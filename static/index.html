@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OfficePilot AI — Quotation Generator</title>
+  <style>
+    /* ── Reset & base ── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: #f0f2f5;
+      color: #1a1a2e;
+      min-height: 100vh;
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+      padding: 2rem 1rem;
+    }
+
+    /* ── Card ── */
+    .card {
+      background: #ffffff;
+      border-radius: 12px;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.10);
+      width: 100%;
+      max-width: 640px;
+      overflow: hidden;
+    }
+
+    .card-header {
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+      color: #e0e0e0;
+      padding: 1.5rem 2rem;
+    }
+    .card-header h1 { font-size: 1.3rem; font-weight: 600; letter-spacing: 0.02em; }
+    .card-header p  { font-size: 0.82rem; opacity: 0.65; margin-top: 0.3rem; }
+
+    .card-body { padding: 2rem; }
+
+    /* ── Section dividers ── */
+    .section-label {
+      font-size: 0.7rem;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: #888;
+      margin: 1.4rem 0 0.7rem;
+      border-bottom: 1px solid #eee;
+      padding-bottom: 0.3rem;
+    }
+    .section-label:first-child { margin-top: 0; }
+
+    /* ── Form grid ── */
+    .row { display: grid; gap: 1rem; margin-bottom: 0.9rem; }
+    .row.cols-2 { grid-template-columns: 1fr 1fr; }
+    .row.cols-3 { grid-template-columns: 1fr 1fr 1fr; }
+    .row.cols-1 { grid-template-columns: 1fr; }
+
+    .field { display: flex; flex-direction: column; gap: 0.3rem; }
+    label  { font-size: 0.78rem; font-weight: 600; color: #555; }
+
+    input, textarea {
+      border: 1.5px solid #ddd;
+      border-radius: 7px;
+      padding: 0.5rem 0.7rem;
+      font-size: 0.9rem;
+      color: #1a1a2e;
+      transition: border-color 0.15s;
+      outline: none;
+      width: 100%;
+      background: #fafafa;
+    }
+    input:focus, textarea:focus { border-color: #4f8ef7; background: #fff; }
+
+    /* ── Submit button ── */
+    .btn-submit {
+      width: 100%;
+      margin-top: 1.6rem;
+      padding: 0.75rem;
+      background: linear-gradient(135deg, #4f8ef7, #1a6cf5);
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      letter-spacing: 0.03em;
+      transition: opacity 0.15s, transform 0.1s;
+    }
+    .btn-submit:hover   { opacity: 0.92; }
+    .btn-submit:active  { transform: scale(0.98); }
+    .btn-submit:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    /* ── Result box ── */
+    #result {
+      margin-top: 1.4rem;
+      border-radius: 8px;
+      padding: 1rem 1.2rem;
+      font-size: 0.85rem;
+      line-height: 1.7;
+      display: none;
+    }
+    #result.success { background: #eafaf1; border: 1.5px solid #2ecc71; color: #1a5c38; }
+    #result.error   { background: #fdf0ef; border: 1.5px solid #e74c3c; color: #7b241c; }
+
+    #result .result-title {
+      font-weight: 700;
+      font-size: 0.95rem;
+      margin-bottom: 0.5rem;
+    }
+    #result .path {
+      background: rgba(0,0,0,0.06);
+      border-radius: 4px;
+      padding: 0.15rem 0.4rem;
+      font-family: 'Consolas', monospace;
+      font-size: 0.8rem;
+      word-break: break-all;
+    }
+    .badge {
+      display: inline-block;
+      padding: 0.1rem 0.5rem;
+      border-radius: 999px;
+      font-size: 0.72rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      margin-left: 0.4rem;
+      vertical-align: middle;
+    }
+    .badge-ok      { background: #d4efdf; color: #1e8449; }
+    .badge-skip    { background: #fef9e7; color: #b7770d; }
+    .badge-fail    { background: #fde8e7; color: #c0392b; }
+
+    /* ── Spinner ── */
+    .spinner {
+      display: inline-block;
+      width: 14px; height: 14px;
+      border: 2.5px solid rgba(255,255,255,0.4);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      margin-right: 0.5rem;
+      vertical-align: middle;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    @media (max-width: 520px) {
+      .row.cols-2, .row.cols-3 { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+
+<div class="card">
+  <div class="card-header">
+    <h1>OfficePilot AI &mdash; Quotation Generator</h1>
+    <p>Creates a numbered Excel quotation file and optional PDF export.</p>
+  </div>
+
+  <div class="card-body">
+    <form id="quotForm" novalidate>
+
+      <!-- ── Folder / Period ── -->
+      <div class="section-label">Period &amp; Date</div>
+      <div class="row cols-3">
+        <div class="field">
+          <label for="year">Year</label>
+          <input id="year" name="year" type="text" value="2026" maxlength="4" required placeholder="2026" />
+        </div>
+        <div class="field">
+          <label for="month">Month</label>
+          <input id="month" name="month" type="text" value="04" maxlength="2" required placeholder="04" />
+        </div>
+        <div class="field">
+          <label for="date">Date (DD-MM-YYYY)</label>
+          <input id="date" name="date" type="text" required placeholder="16-04-2026" />
+        </div>
+      </div>
+
+      <!-- ── Client ── -->
+      <div class="section-label">Client</div>
+      <div class="row cols-1">
+        <div class="field">
+          <label for="client_name">Client Name</label>
+          <input id="client_name" name="client_name" type="text" required placeholder="Gulf Extrusion" />
+        </div>
+      </div>
+
+      <!-- ── Item ── -->
+      <div class="section-label">Item Details</div>
+      <div class="row cols-1">
+        <div class="field">
+          <label for="description">Description</label>
+          <input id="description" name="description" type="text" required placeholder="Fabrication of S.S Roller" />
+        </div>
+      </div>
+      <div class="row cols-1">
+        <div class="field">
+          <label for="size">Size / Specification</label>
+          <input id="size" name="size" type="text" placeholder="40 x 120 mm long" />
+        </div>
+      </div>
+
+      <!-- ── Pricing ── -->
+      <div class="section-label">Pricing</div>
+      <div class="row cols-2">
+        <div class="field">
+          <label for="quantity">Quantity</label>
+          <input id="quantity" name="quantity" type="number" value="1" min="0.01" step="any" required />
+        </div>
+        <div class="field">
+          <label for="rate">Rate (AED)</label>
+          <input id="rate" name="rate" type="number" value="0" min="0" step="any" required />
+        </div>
+      </div>
+      <div class="row cols-2">
+        <div class="field">
+          <label for="tax">Tax (AED)</label>
+          <input id="tax" name="tax" type="number" value="0" min="0" step="any" required />
+        </div>
+        <div class="field">
+          <label for="total">Total (AED)</label>
+          <input id="total" name="total" type="number" value="0" min="0" step="any" required />
+        </div>
+      </div>
+
+      <button class="btn-submit" type="submit" id="submitBtn">
+        Generate Quotation
+      </button>
+    </form>
+
+    <!-- ── Result ── -->
+    <div id="result"></div>
+  </div>
+</div>
+
+<script>
+  // ── Auto-fill today's date ──
+  (function () {
+    const d = new Date();
+    const dd  = String(d.getDate()).padStart(2, '0');
+    const mm  = String(d.getMonth() + 1).padStart(2, '0');
+    const yyyy = d.getFullYear();
+    document.getElementById('date').value  = `${dd}-${mm}-${yyyy}`;
+    document.getElementById('year').value  = String(yyyy);
+    document.getElementById('month').value = mm;
+  })();
+
+  // ── Auto-calculate total when rate or tax changes ──
+  function recalcTotal() {
+    const rate = parseFloat(document.getElementById('rate').value) || 0;
+    const qty  = parseFloat(document.getElementById('quantity').value) || 1;
+    const tax  = parseFloat(document.getElementById('tax').value) || 0;
+    document.getElementById('total').value = ((rate * qty) + tax).toFixed(2);
+  }
+  ['rate', 'quantity', 'tax'].forEach(id =>
+    document.getElementById(id).addEventListener('input', recalcTotal)
+  );
+
+  // ── Form submit ──
+  document.getElementById('quotForm').addEventListener('submit', async function (e) {
+    e.preventDefault();
+
+    const btn    = document.getElementById('submitBtn');
+    const result = document.getElementById('result');
+
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span> Generating…';
+    result.style.display = 'none';
+
+    const payload = {
+      year:        document.getElementById('year').value.trim(),
+      month:       document.getElementById('month').value.trim(),
+      date:        document.getElementById('date').value.trim(),
+      client_name: document.getElementById('client_name').value.trim(),
+      description: document.getElementById('description').value.trim(),
+      size:        document.getElementById('size').value.trim(),
+      quantity:    parseFloat(document.getElementById('quantity').value),
+      rate:        parseFloat(document.getElementById('rate').value),
+      tax:         parseFloat(document.getElementById('tax').value),
+      total:       parseFloat(document.getElementById('total').value),
+    };
+
+    try {
+      const resp = await fetch('/quotations/create', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify(payload),
+      });
+
+      const data = await resp.json();
+
+      if (resp.ok && data.success) {
+        const pdfBadge = data.pdf_status === 'created'
+          ? '<span class="badge badge-ok">PDF OK</span>'
+          : data.pdf_status === 'skipped'
+            ? '<span class="badge badge-skip">PDF Skipped</span>'
+            : '<span class="badge badge-fail">PDF Failed</span>';
+
+        result.className = 'success';
+        result.innerHTML = `
+          <div class="result-title">Quotation Created ${pdfBadge}</div>
+          <table style="width:100%;border-collapse:collapse;font-size:0.83rem">
+            <tr><td style="padding:3px 0;width:120px;color:#555">Ref Number</td>
+                <td><strong>#${data.new_ref_number}</strong></td></tr>
+            <tr><td style="padding:3px 0;color:#555">Filename</td>
+                <td>${data.filename}</td></tr>
+            <tr><td style="padding:3px 0;color:#555;vertical-align:top">Excel Path</td>
+                <td><span class="path">${data.excel_path}</span></td></tr>
+            ${data.pdf_path
+              ? `<tr><td style="padding:3px 0;color:#555;vertical-align:top">PDF Path</td>
+                     <td><span class="path">${data.pdf_path}</span></td></tr>`
+              : ''}
+            <tr><td style="padding:3px 0;color:#555;vertical-align:top">PDF Note</td>
+                <td style="font-size:0.78rem;color:#666">${data.pdf_message}</td></tr>
+            <tr><td style="padding:3px 0;color:#555">Folder</td>
+                <td><span class="path">${data.source_folder}</span></td></tr>
+          </table>`;
+      } else {
+        const msg = data.detail || data.message || JSON.stringify(data);
+        result.className = 'error';
+        result.innerHTML = `<div class="result-title">Error</div>${msg}`;
+      }
+    } catch (err) {
+      result.className = 'error';
+      result.innerHTML = `<div class="result-title">Network / Server Error</div>${err.message}`;
+    }
+
+    result.style.display = 'block';
+    btn.disabled = false;
+    btn.textContent = 'Generate Quotation';
+  });
+</script>
+</body>
+</html>

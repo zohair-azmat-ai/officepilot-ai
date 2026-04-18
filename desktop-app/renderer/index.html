@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; connect-src http://127.0.0.1:8000; style-src 'self' 'unsafe-inline'; script-src 'self'" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OfficePilot AI</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <!-- ═══════════════════════════════════════════════════════ TITLEBAR ══ -->
+  <header class="titlebar">
+    <div class="titlebar-left">
+      <svg class="logo-icon" viewBox="0 0 28 28" fill="none">
+        <rect width="28" height="28" rx="6" fill="#4f8ef7"/>
+        <path d="M7 8h14M7 12h10M7 16h12M7 20h8" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
+        <circle cx="21" cy="19" r="4" fill="#0d0f1a" stroke="#4f8ef7" stroke-width="1.5"/>
+        <path d="M20 19l1 1 2-2" stroke="#4f8ef7" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <span class="app-name">OfficePilot <strong>AI</strong></span>
+      <span class="app-version" id="appVersion">v1.0.0</span>
+    </div>
+    <div class="titlebar-right">
+      <div class="backend-status" id="backendStatus">
+        <span class="status-dot" id="statusDot"></span>
+        <span class="status-text" id="statusText">Connecting…</span>
+        <button class="btn-retry" id="retryBtn" title="Retry connection">&#8635;</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- ═══════════════════════════════════════════════════════════ TABS ══ -->
+  <nav class="tab-bar">
+    <button class="tab-btn active" data-tab="quotation">
+      <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+        <rect x="1" y="1" width="12" height="12" rx="2" stroke="currentColor" stroke-width="1.4"/>
+        <path d="M3.5 4.5h7M3.5 7h5M3.5 9.5h6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+      </svg>
+      Create Quotation
+    </button>
+    <button class="tab-btn" data-tab="quickcmd">
+      <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+        <polyline points="2,4 6,7 2,10" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M7 10h5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+      </svg>
+      Quick Command
+    </button>
+    <button class="tab-btn" data-tab="ledger">
+      <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+        <rect x="1" y="1" width="12" height="12" rx="2" stroke="currentColor" stroke-width="1.4"/>
+        <path d="M4 4.5h6M4 7h6M4 9.5h4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+        <circle cx="11" cy="10" r="2.5" fill="currentColor" opacity=".25"/>
+        <path d="M10.2 10l.6.6 1.2-1.2" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      Ledger
+    </button>
+  </nav>
+
+  <!-- ═════════════════════════════════════════ TAB: CREATE QUOTATION ══ -->
+  <main class="tab-panel active" id="tab-quotation">
+    <div class="scroll-container">
+      <form id="quotForm" novalidate autocomplete="off">
+
+        <fieldset class="field-group">
+          <legend>Period &amp; Date</legend>
+          <div class="form-row cols-3">
+            <div class="field">
+              <label for="year">Year</label>
+              <input id="year" name="year" type="text" value="2026" maxlength="4" required placeholder="2026" />
+            </div>
+            <div class="field">
+              <label for="month">Month</label>
+              <input id="month" name="month" type="text" value="04" maxlength="2" required placeholder="04" />
+            </div>
+            <div class="field">
+              <label for="date">Date <span class="hint">DD-MM-YYYY</span></label>
+              <input id="date" name="date" type="text" required placeholder="16-04-2026" />
+            </div>
+          </div>
+        </fieldset>
+
+        <fieldset class="field-group">
+          <legend>Client</legend>
+          <div class="form-row cols-1">
+            <div class="field company-name-wrap">
+              <label for="client_name">Client Name</label>
+              <input id="client_name" name="client_name" type="text" required
+                     placeholder="Gulf Extrusion" autocomplete="off" />
+              <div class="company-dropdown" id="companyDropdown" style="display:none"></div>
+            </div>
+          </div>
+
+          <!-- Company detail panel — shown when a company is matched or entered -->
+          <div class="company-panel" id="companyPanel" style="display:none">
+            <div class="company-panel-header">
+              <span class="company-panel-badge" id="companyPanelBadge">Matched</span>
+              <button type="button" class="company-panel-clear" id="companyPanelClear" title="Clear">&#x2715;</button>
+            </div>
+            <div class="form-row cols-2">
+              <div class="field">
+                <label for="c_attn">Attn</label>
+                <input id="c_attn" name="c_attn" type="text" placeholder="MR. JOHN" />
+              </div>
+              <div class="field">
+                <label for="c_trn">TRN</label>
+                <input id="c_trn" name="c_trn" type="text" placeholder="100000000000000" />
+              </div>
+            </div>
+            <div class="form-row cols-2" style="margin-top:10px">
+              <div class="field">
+                <label for="c_phone">Phone</label>
+                <input id="c_phone" name="c_phone" type="text" placeholder="04-1234567" />
+              </div>
+              <div class="field">
+                <label for="c_fax">Fax</label>
+                <input id="c_fax" name="c_fax" type="text" placeholder="04-1234567" />
+              </div>
+            </div>
+          </div>
+        </fieldset>
+
+        <fieldset class="field-group">
+          <legend>Items</legend>
+          <div id="itemsList"></div>
+          <button type="button" id="addItemBtn" class="btn-add-item">
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+              <path d="M6 1v10M1 6h10" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+            </svg>
+            Add Item
+          </button>
+        </fieldset>
+
+        <fieldset class="field-group">
+          <legend>Totals (AED)</legend>
+          <div class="form-row cols-3">
+            <div class="field">
+              <label>Subtotal <span class="hint">auto</span></label>
+              <input id="subtotal" type="number" value="0.00" readonly tabindex="-1" class="input-readonly" />
+            </div>
+            <div class="field">
+              <label for="tax">Tax / VAT</label>
+              <input id="tax" name="tax" type="number" value="0" min="0" step="any" placeholder="0.00" />
+            </div>
+            <div class="field">
+              <label>Total <span class="hint">auto</span></label>
+              <input id="total" type="number" value="0.00" readonly tabindex="-1" class="input-readonly" />
+            </div>
+          </div>
+        </fieldset>
+
+        <button class="btn-generate" type="submit" id="submitBtn">
+          <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+            <path d="M9 2v14M2 9h14" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
+          </svg>
+          Generate Quotation
+        </button>
+      </form>
+
+      <div class="result-card" id="resultCard" style="display:none">
+        <div class="result-header" id="resultHeader"></div>
+        <div class="result-body"   id="resultBody"></div>
+      </div>
+    </div>
+  </main>
+
+  <!-- ═══════════════════════════════════════════ TAB: QUICK COMMAND ══ -->
+  <main class="tab-panel" id="tab-quickcmd">
+    <div class="scroll-container">
+
+      <!-- Command input area -->
+      <div class="field-group qc-input-group">
+        <div class="qc-header">
+          <div>
+            <div class="qc-title">Quick Command</div>
+            <div class="qc-subtitle">Type a plain-English instruction — the AI will parse it into a quotation.</div>
+          </div>
+          <div class="ai-badge">AI Parser</div>
+        </div>
+
+        <div class="field" style="margin-top:14px">
+          <label for="nlCommand">Command</label>
+          <textarea
+            id="nlCommand"
+            rows="3"
+            placeholder="e.g.  Create quotation for Gulf Extrusion fabrication of SS roller 40x120 qty 1 rate 500"
+          ></textarea>
+        </div>
+
+        <div class="qc-examples">
+          <span class="examples-label">Examples:</span>
+          <button class="example-chip" data-cmd="Create quotation for Gulf Extrusion fabrication of SS roller 40x120 qty 1 rate 500">Gulf Extrusion roller</button>
+          <button class="example-chip" data-cmd="Quote for ABB Company supply of 10mm bolts x5 rate 50 vat 5%">ABB bolts</button>
+          <button class="example-chip" data-cmd="Quotation for Quant Gulf MFG of hydraulic block DIA 260 2-nos rate 950 tax 47.5">Quant Gulf block</button>
+        </div>
+
+        <button class="btn-parse" id="parseBtn">
+          <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
+            <circle cx="7.5" cy="7.5" r="6.5" stroke="currentColor" stroke-width="1.5"/>
+            <path d="M5 7.5h5M8 5.5l2 2-2 2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          Parse &amp; Preview
+        </button>
+      </div>
+
+      <!-- Preview card (hidden until parsed) -->
+      <div class="qc-preview" id="qcPreview" style="display:none">
+
+        <div class="preview-header">
+          <span class="preview-title">Parsed Fields</span>
+          <span class="preview-hint">Review before creating</span>
+        </div>
+
+        <div class="preview-grid" id="previewGrid"></div>
+
+        <!-- Warnings -->
+        <div class="preview-warnings" id="previewWarnings" style="display:none"></div>
+
+        <!-- Actions -->
+        <div class="preview-actions">
+          <button class="btn-confirm" id="confirmBtn">
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+              <path d="M2.5 7.5l3 3 6-6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            Confirm &amp; Create
+          </button>
+          <button class="btn-edit-form" id="editFormBtn">
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+              <path d="M2 10.5V12h1.5l6-6-1.5-1.5-6 6zM11.7 3.3a1 1 0 000-1.4l-.6-.6a1 1 0 00-1.4 0l-.8.8 2 2 .8-.8z" fill="currentColor"/>
+            </svg>
+            Edit in Form
+          </button>
+        </div>
+
+        <!-- Command result (after confirm) -->
+        <div class="result-card" id="qcResultCard" style="display:none;margin-top:14px">
+          <div class="result-header" id="qcResultHeader"></div>
+          <div class="result-body"   id="qcResultBody"></div>
+        </div>
+
+      </div>
+
+    </div>
+  </main>
+
+  <!-- ═══════════════════════════════════════════════════ TAB: LEDGER ══ -->
+  <main class="tab-panel" id="tab-ledger">
+    <div class="scroll-container">
+
+      <!-- Sub-navigation -->
+      <div class="ldg-subnav">
+        <button class="ldg-tab-btn active" data-ltab="invoice">
+          <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+            <rect x=".7" y=".7" width="11.6" height="11.6" rx="2" stroke="currentColor" stroke-width="1.3"/>
+            <path d="M3 4h7M3 6.5h5M3 9h6" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+          </svg>
+          New Invoice
+        </button>
+        <button class="ldg-tab-btn" data-ltab="payment">
+          <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+            <rect x=".7" y="3.2" width="11.6" height="7.6" rx="1.8" stroke="currentColor" stroke-width="1.3"/>
+            <path d="M.7 5.8h11.6" stroke="currentColor" stroke-width="1.3"/>
+            <rect x="2.5" y="7.5" width="3" height="1.5" rx=".5" fill="currentColor" opacity=".5"/>
+          </svg>
+          Record Payment
+        </button>
+        <button class="ldg-tab-btn" data-ltab="view">
+          <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+            <path d="M1 3h11M1 6.5h11M1 10h11" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+            <circle cx="3.5" cy="3" r="1" fill="currentColor"/>
+            <circle cx="3.5" cy="6.5" r="1" fill="currentColor"/>
+            <circle cx="3.5" cy="10" r="1" fill="currentColor"/>
+          </svg>
+          View Ledger
+        </button>
+      </div>
+
+      <!-- ─────────────────────────── PANEL: New Invoice ──── -->
+      <div class="ldg-panel active" id="ltab-invoice">
+        <form id="invoiceForm" novalidate autocomplete="off">
+
+          <fieldset class="field-group">
+            <legend>Company</legend>
+            <div class="form-row cols-1">
+              <div class="field company-name-wrap">
+                <label for="inv_company">Company Name</label>
+                <input id="inv_company" type="text" required placeholder="Gulf Extrusion" autocomplete="off" />
+                <div class="company-dropdown" id="invCompanyDropdown" style="display:none"></div>
+              </div>
+            </div>
+          </fieldset>
+
+          <fieldset class="field-group">
+            <legend>Invoice Details</legend>
+            <div class="form-row cols-2">
+              <div class="field">
+                <label for="inv_number">Invoice Number</label>
+                <input id="inv_number" type="text" required placeholder="2026/04/001" />
+              </div>
+              <div class="field">
+                <label for="inv_lpo">LPO Number</label>
+                <input id="inv_lpo" type="text" placeholder="LPO-12345" />
+              </div>
+            </div>
+            <div class="form-row cols-3" style="margin-top:10px">
+              <div class="field">
+                <label for="inv_date">Invoice Date <span class="hint">DD-MM-YYYY</span></label>
+                <input id="inv_date" type="text" required placeholder="18-04-2026" />
+              </div>
+              <div class="field">
+                <label for="inv_terms">Payment Terms <span class="hint">days</span></label>
+                <input id="inv_terms" type="number" min="0" value="30" />
+              </div>
+              <div class="field">
+                <label>Due Date <span class="hint">auto</span></label>
+                <input id="inv_due" type="text" readonly tabindex="-1" class="input-readonly" placeholder="—" />
+              </div>
+            </div>
+            <div class="form-row cols-1" style="margin-top:10px">
+              <div class="field">
+                <label for="inv_amount">Invoice Amount (AED)</label>
+                <input id="inv_amount" type="number" min="0.01" step="any" required placeholder="0.00" />
+              </div>
+            </div>
+            <div class="form-row cols-1" style="margin-top:10px">
+              <div class="field">
+                <label for="inv_remarks">Remarks</label>
+                <input id="inv_remarks" type="text" placeholder="Optional remarks" />
+              </div>
+            </div>
+          </fieldset>
+
+          <button type="submit" class="btn-generate" id="saveInvoiceBtn">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <path d="M8 2v12M2 8h12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+            </svg>
+            Save Invoice
+          </button>
+        </form>
+        <div class="result-card" id="invoiceResultCard" style="display:none">
+          <div class="result-header" id="invoiceResultHeader"></div>
+          <div class="result-body"   id="invoiceResultBody"></div>
+        </div>
+      </div>
+
+      <!-- ──────────────────────── PANEL: Record Payment ──── -->
+      <div class="ldg-panel" id="ltab-payment">
+        <form id="paymentForm" novalidate autocomplete="off">
+
+          <fieldset class="field-group">
+            <legend>Company &amp; Invoice</legend>
+            <div class="form-row cols-1">
+              <div class="field company-name-wrap">
+                <label for="pay_company">Company Name</label>
+                <input id="pay_company" type="text" required placeholder="Gulf Extrusion" autocomplete="off" />
+                <div class="company-dropdown" id="payCompanyDropdown" style="display:none"></div>
+              </div>
+            </div>
+            <div class="form-row cols-1" style="margin-top:10px">
+              <div class="field">
+                <label for="pay_invoice">Invoice</label>
+                <select id="pay_invoice" required>
+                  <option value="">— select company first —</option>
+                </select>
+              </div>
+            </div>
+          </fieldset>
+
+          <fieldset class="field-group">
+            <legend>Payment Details</legend>
+            <div class="form-row cols-2">
+              <div class="field">
+                <label for="pay_date">Payment Date <span class="hint">DD-MM-YYYY</span></label>
+                <input id="pay_date" type="text" required placeholder="18-04-2026" />
+              </div>
+              <div class="field">
+                <label for="pay_mode">Payment Mode</label>
+                <select id="pay_mode">
+                  <option value="Bank Transfer">Bank Transfer</option>
+                  <option value="Cheque">Cheque</option>
+                  <option value="Cash">Cash</option>
+                  <option value="Online">Online</option>
+                </select>
+              </div>
+            </div>
+            <div class="form-row cols-1" style="margin-top:10px">
+              <div class="field">
+                <label for="pay_amount">Amount Received (AED)</label>
+                <input id="pay_amount" type="number" min="0.01" step="any" required placeholder="0.00" />
+              </div>
+            </div>
+            <div class="form-row cols-1" style="margin-top:10px">
+              <div class="field">
+                <label for="pay_remarks">Remarks</label>
+                <input id="pay_remarks" type="text" placeholder="Optional remarks" />
+              </div>
+            </div>
+          </fieldset>
+
+          <button type="submit" class="btn-generate" id="savePaymentBtn">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <path d="M2.5 8.5l3.5 3.5 8-8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            Record Payment
+          </button>
+        </form>
+        <div class="result-card" id="paymentResultCard" style="display:none">
+          <div class="result-header" id="paymentResultHeader"></div>
+          <div class="result-body"   id="paymentResultBody"></div>
+        </div>
+      </div>
+
+      <!-- ──────────────────────────── PANEL: View Ledger ──── -->
+      <div class="ldg-panel" id="ltab-view">
+
+        <div class="ldg-filter-bar">
+          <div class="field" style="flex:1;min-width:0;max-width:280px">
+            <label for="ldgFilterCompany">Company</label>
+            <select id="ldgFilterCompany">
+              <option value="">All Companies</option>
+            </select>
+          </div>
+          <div class="field" style="flex:0 0 180px">
+            <label for="ldgFilterStatus">Status</label>
+            <select id="ldgFilterStatus">
+              <option value="">All</option>
+              <option value="UNPAID">Unpaid</option>
+              <option value="PARTIALLY PAID">Partially Paid</option>
+              <option value="PAID">Paid</option>
+              <option value="OVERDUE">Overdue</option>
+            </select>
+          </div>
+          <button class="btn-ldg-refresh" id="ldgRefreshBtn" type="button">&#8635; Refresh</button>
+        </div>
+
+        <div class="ldg-kpi-row" id="ldgKpiRow">
+          <div class="ldg-kpi">
+            <div class="ldg-kpi-label">Total Invoiced</div>
+            <div class="ldg-kpi-value" id="ldgKpiInvoiced">AED 0.00</div>
+          </div>
+          <div class="ldg-kpi ldg-kpi--green">
+            <div class="ldg-kpi-label">Total Received</div>
+            <div class="ldg-kpi-value" id="ldgKpiReceived">AED 0.00</div>
+          </div>
+          <div class="ldg-kpi ldg-kpi--amber">
+            <div class="ldg-kpi-label">Outstanding</div>
+            <div class="ldg-kpi-value" id="ldgKpiOutstanding">AED 0.00</div>
+          </div>
+        </div>
+
+        <div id="ldgTableWrap">
+          <div class="ldg-empty" id="ldgEmpty">No invoices yet. Add one using <strong>New Invoice</strong>.</div>
+        </div>
+
+      </div><!-- /ltab-view -->
+
+    </div><!-- /scroll-container -->
+  </main>
+
+  <!-- ════════════════════════════════════════════════════════ FOOTER ══ -->
+  <footer class="statusbar">
+    <span id="footerMsg">Ready</span>
+    <span class="statusbar-right">OfficePilot AI &mdash; Local Edition</span>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

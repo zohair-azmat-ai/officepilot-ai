@@ -1,0 +1,79 @@
+{
+  "name": "officepilot-ai",
+  "version": "1.0.0",
+  "description": "OfficePilot AI — Local Windows Quotation Automation",
+  "main": "main.js",
+  "author": "OfficePilot AI",
+  "license": "MIT",
+  "scripts": {
+    "start":           "electron .",
+    "dev":             "electron . --dev",
+    "build":           "electron-builder --win",
+    "build:portable":  "electron-builder --win portable",
+    "build:installer": "electron-builder --win nsis"
+  },
+  "devDependencies": {
+    "electron":         "^29.4.6",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId":       "com.officepilot.quotation-agent",
+    "productName": "OfficePilot AI",
+    "copyright":   "OfficePilot AI",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "renderer/**/*",
+      "build/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "../app",
+        "to":   "backend/app",
+        "filter": ["**/*", "!**/__pycache__/**", "!**/*.pyc"]
+      },
+      {
+        "from": "../templates",
+        "to":   "backend/templates",
+        "filter": ["**/*"]
+      },
+      {
+        "from": "../data",
+        "to":   "backend/data",
+        "filter": ["**/*"]
+      },
+      {
+        "from": "../run.py",
+        "to":   "backend/run.py"
+      },
+      {
+        "from": "../run_prod.py",
+        "to":   "backend/run_prod.py"
+      },
+      {
+        "from": "../requirements.txt",
+        "to":   "backend/requirements.txt"
+      }
+    ],
+    "win": {
+      "target": [
+        { "target": "portable", "arch": ["x64"] },
+        { "target": "nsis",     "arch": ["x64"] }
+      ]
+    },
+    "nsis": {
+      "oneClick":                       false,
+      "perMachine":                     false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut":          true,
+      "createStartMenuShortcut":        true,
+      "shortcutName":                   "OfficePilot AI"
+    },
+    "portable": {
+      "artifactName": "OfficePilot-AI-${version}-portable.exe"
+    }
+  }
+}
