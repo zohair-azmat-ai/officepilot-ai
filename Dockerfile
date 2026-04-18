@@ -18,18 +18,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY app/         ./app/
-COPY templates/   ./templates/
-COPY data/        ./data/
-COPY static/      ./static/
-COPY run_prod.py  .
+COPY app/              ./app/
+COPY data/             ./data/
+COPY static/           ./static/
+COPY create_template.py .
+COPY run_prod.py        .
+
+# Generate the Excel template at build time (no binary in source control)
+RUN mkdir -p /app/templates /app/output && python create_template.py
 
 # Hugging Face Spaces exposes port 7860
 ENV APP_HOST=0.0.0.0
 ENV APP_PORT=7860
 ENV QUOTATION_BASE_PATH=/app/output
-
-RUN mkdir -p /app/output
 
 EXPOSE 7860
 

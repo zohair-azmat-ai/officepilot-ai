@@ -25,6 +25,10 @@ data/payments.json
 desktop-app/node_modules/
 desktop-app/dist/
 
+# ── Excel template (generated at runtime / Docker build — not committed) ─────
+# Run `python create_template.py` locally to generate this file.
+templates/quotation_template.xlsx
+
 # ── Windows-specific launchers (contain machine-specific paths) ───────────────
 start_backend.vbs
 
