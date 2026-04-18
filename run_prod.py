@@ -15,12 +15,13 @@ if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
     os.environ.setdefault('OFFICEPILOT_RESOURCE_DIR', sys._MEIPASS)
 
 import uvicorn
+from app.config import settings
 
 if __name__ == '__main__':
     uvicorn.run(
         'app.main:app',
-        host='127.0.0.1',
-        port=8000,
+        host=settings.APP_HOST,
+        port=settings.APP_PORT,
         reload=False,
         log_level='info',
     )

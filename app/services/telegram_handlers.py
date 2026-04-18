@@ -190,24 +190,7 @@ async def _handle_quotation(
 
     await send_text(bot, chat_id, reply)
 
-    # 6. Send Excel file ─────────────────────────────────────────────────────
-    excel_sent = await send_document(
-        bot=bot,
-        chat_id=chat_id,
-        file_path=result.excel_path,
-        caption=f"📊 Excel — {result.filename}",
-    )
-    if excel_sent:
-        logger.info("Excel sent to chat_id=%s: %s", chat_id, result.filename)
-    else:
-        logger.error("Failed to send Excel to chat_id=%s", chat_id)
-        await send_text(
-            bot, chat_id,
-            "⚠️ Excel file generated but could not be sent.\n"
-            "Check the Quotation folder on the PC.",
-        )
-
-    # 7. Send PDF file (non-fatal if missing or failed) ──────────────────────
+    # 6. Send PDF first — fall back to Excel if PDF unavailable ────────────────
     if result.pdf_status == "created" and result.pdf_path:
         pdf_sent = await send_document(
             bot=bot,
@@ -217,11 +200,23 @@ async def _handle_quotation(
         )
         if pdf_sent:
             logger.info("PDF sent to chat_id=%s", chat_id)
-        else:
-            logger.error("Failed to send PDF to chat_id=%s", chat_id)
-            await send_text(bot, chat_id, "⚠️ PDF was generated but could not be sent via Telegram.")
+            return
+        logger.error("PDF exists but failed to send to chat_id=%s — falling back to Excel", chat_id)
+
+    # 7. Fallback: send Excel (also reached when PDF was never generated) ─────
+    logger.info("Sending Excel to chat_id=%s (pdf_status=%s)", chat_id, result.pdf_status)
+    excel_sent = await send_document(
+        bot=bot,
+        chat_id=chat_id,
+        file_path=result.excel_path,
+        caption=f"📊 Excel — {result.filename}",
+    )
+    if excel_sent:
+        logger.info("Excel sent to chat_id=%s", chat_id)
     else:
-        logger.info(
-            "PDF not sent to chat_id=%s — status=%s message=%s",
-            chat_id, result.pdf_status, result.pdf_message,
+        logger.error("Failed to send Excel to chat_id=%s", chat_id)
+        await send_text(
+            bot, chat_id,
+            "⚠️ Quotation was generated but the file could not be sent.\n"
+            "Check the Quotation folder on the PC.",
         )
