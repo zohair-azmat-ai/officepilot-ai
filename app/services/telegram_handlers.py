@@ -649,7 +649,7 @@ async def _handle_quotation(
     today = _date.today()
     items = [
         QuotationItem(
-            description=it.description, size=it.size,
+            description=it.description, size="",
             quantity=it.quantity, rate=it.rate, amount=it.amount,
         )
         for it in p.items
@@ -661,7 +661,7 @@ async def _handle_quotation(
         date=p.date or today.strftime("%d-%m-%Y"),
         client_name=p.client_name,
         items=items, attn=attn, trn=trn, phone=phone, fax=fax,
-        description=p.description, size=p.size,
+        description=p.description, size="",
         quantity=p.quantity, rate=p.rate, tax=p.tax, total=p.total,
     )
 
@@ -946,7 +946,7 @@ async def _handle_nl_quotation(
         items=items,
         attn=attn, trn=trn, phone=phone, fax=fax,
         description=items[0].description,
-        size=items[0].size,
+        size="",
         quantity=items[0].quantity,
         rate=items[0].rate,
         tax=tax,

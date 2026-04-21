@@ -110,24 +110,21 @@ _TAX_PCT = re.compile(
     re.I,
 )
 
-# Size / dimensions
-_SIZE = [
-    re.compile(
-        r'(\d+(?:\.\d+)?)\s*[xX×]\s*(\d+(?:\.\d+)?)(?:\s*[xX×]\s*(\d+(?:\.\d+)?))?'
-        r'(?:\s*(?:mm|cm|m|inch|"))?\s*(?:(?:long|thick|wide|height|deep|thk)\b)?',
-        re.I,
-    ),
-    re.compile(r'(?:dia(?:meter)?\.?\s*[:\-]?\s*)(\d+(?:\.\d+)?)\s*(?:mm|cm|m)?', re.I),
-    re.compile(r'[øØ]\s*(\d+(?:\.\d+)?)\s*(?:mm|cm)?', re.I),
-    re.compile(r'(\d+(?:\.\d+)?)\s*mm\s*(?:long|thick|wide|height|deep|thk)\b', re.I),
-]
-
-# Words that signal the end of a client name / start of description
+# Words that signal the end of a client name / start of description.
+# Includes fabrication verbs AND common engineering material/product nouns so
+# that dimensions embedded in descriptions (e.g. "ss roller dia 40mm") are
+# correctly kept in description rather than absorbed into the client name.
 _DESC_STARTER = re.compile(
     r'\b(?:fabricat|manufactur|mfg\b|mfg\.|supply|suppli|mak|assembl|repair|'
     r'install|paint|grind|drill|cut|weld|machin|polish|coat|test|deliver|'
     r'provid|finish|process|modif|design|develop|construct|build|erect|'
-    r'overhaul|servic|work)',
+    r'overhaul|servic|work|'
+    r'ss\b|ms\b|gi\b|ci\b|'
+    r'pipe|tube|rod|bar|plate|sheet|angle|channel|flange|fitting|'
+    r'roller|bearing|gear|shaft|bracket|frame|stand|tank|vessel|'
+    r'bolt|nut|screw|washer|gasket|seal|valve|pump|motor|'
+    r'rubber|teflon|pvc|nylon|plastic|'
+    r'steel|iron|alumin|copper|brass|zinc|nickel)',
     re.I,
 )
 
@@ -164,17 +161,6 @@ def _extract_and_remove(patterns: list, text: str):
 def _ws(text: str) -> str:
     """Collapse runs of whitespace."""
     return re.sub(r'\s{2,}', ' ', text).strip()
-
-
-def _extract_size(text: str):
-    """Return (size_string, cleaned_text, found)."""
-    for pat in _SIZE:
-        m = pat.search(text)
-        if m:
-            raw = m.group(0).strip()
-            cleaned = text[:m.start()] + ' ' + text[m.end():]
-            return raw, _ws(cleaned), True
-    return '', text, False
 
 
 def _extract_client(text: str):
@@ -259,18 +245,15 @@ def _parse_item_text(text: str) -> dict:
     if not found_rate:
         rate = 0.0
 
-    size, work, found_size = _extract_size(work)
     description = _clean_description(work)
 
     return {
         "description": description or text,
-        "size":        size,
         "quantity":    qty,
         "rate":        rate,
         "amount":      round(qty * rate, 2),
         "found_qty":   found_qty,
         "found_rate":  found_rate,
-        "found_size":  found_size,
     }
 
 
@@ -329,9 +312,6 @@ def _handle_single_item(raw: str, work: str) -> ParseCommandResponse:
 
     total = round(line_amount + tax, 2)
 
-    # ── Size ──────────────────────────────────────────────────────────────────
-    size, work, found_size = _extract_size(work)
-
     # ── Client ────────────────────────────────────────────────────────────────
     client, work, found_client = _extract_client(work)
     if not found_client:
@@ -352,7 +332,7 @@ def _handle_single_item(raw: str, work: str) -> ParseCommandResponse:
         date        = today.strftime("%d-%m-%Y"),
         client_name = client or "UNKNOWN",
         description = description or raw,
-        size        = size,
+        size        = "",
         quantity    = qty,
         rate        = rate,
         tax         = tax,
@@ -363,15 +343,15 @@ def _handle_single_item(raw: str, work: str) -> ParseCommandResponse:
     confidence = FieldConfidence(
         client_name = found_client,
         description = found_description,
-        size        = found_size,
+        size        = False,
         quantity    = found_qty,
         rate        = found_rate,
         tax         = found_tax,
     )
 
     logger.info(
-        "Single-item parse | client=%r desc=%r size=%r qty=%s rate=%s tax=%s total=%s",
-        parsed.client_name, parsed.description, parsed.size,
+        "Single-item parse | client=%r desc=%r qty=%s rate=%s tax=%s total=%s",
+        parsed.client_name, parsed.description,
         parsed.quantity, parsed.rate, parsed.tax, parsed.total,
     )
 
@@ -421,7 +401,7 @@ def _handle_multi_item(
 
         parsed_items.append(ParsedItem(
             description = item["description"],
-            size        = item["size"],
+            size        = "",
             quantity    = item["quantity"],
             rate        = item["rate"],
             amount      = item["amount"],
@@ -445,7 +425,7 @@ def _handle_multi_item(
         date        = today.strftime("%d-%m-%Y"),
         client_name = client,
         description = first.description,
-        size        = first.size,
+        size        = "",
         quantity    = first.quantity,
         rate        = first.rate,
         tax         = tax,
@@ -456,10 +436,10 @@ def _handle_multi_item(
     confidence = FieldConfidence(
         client_name = found_client,
         description = all(bool(i.description) for i in parsed_items),
-        size        = any(bool(i.size) for i in parsed_items),
+        size        = False,
         quantity    = True,
         rate        = all(i.rate > 0 for i in parsed_items),
-        tax         = False,   # always auto-calculated for multi-item
+        tax         = False,
     )
 
     logger.info(

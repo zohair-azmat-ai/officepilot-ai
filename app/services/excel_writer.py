@@ -24,10 +24,7 @@ Template layout (rows)
   Row 18  — Table header row           ← NEVER TOUCH
   Row 19  — Sub-header row             ← NEVER TOUCH
   Row 20  — Item 1 main row (H20:I20 merged for Qty, J20:K20 merged for Rate)
-  Row 21  — Sub-description row (B21:G21 merged; H21 width=1.28 single cell)
-            Used for size/spec in single-item mode.
-            SKIPPED in multi-item mode to avoid qty being written to
-            the invisible 1.28-wide H21 cell.
+  Row 21  — Sub-description row (B21:G21 merged) — used for description overflow.
   Rows 22–35 — Item rows 2–15 (H:I merged, J:K merged, 20.25pt height each)
 
   Row 36  L36  ← Subtotal
@@ -312,7 +309,6 @@ def _write_item_block(
     start_row: int,
     serial: int,
     description: str,
-    size: str | None,
     quantity: float,
     rate: float,
     max_row: int,
@@ -323,7 +319,6 @@ def _write_item_block(
     start_row  : serial | desc line 1 | qty | rate | amount
     start_row+1:        | desc line 2 |     |      |
     ...
-    last_used  :        | size/spec   |     |      |   (if provided)
 
     Returns (line_amount, next_available_row).
     """
@@ -344,11 +339,6 @@ def _write_item_block(
         if current_row > max_row:
             break
         _safe_write(cell_map, merge_map, "B", current_row, line)
-        current_row += 1
-
-    # Size / spec on the next available row after description
-    if size and current_row <= max_row:
-        _safe_write(cell_map, merge_map, "B", current_row, size)
         current_row += 1
 
     return line_amount, current_row
@@ -449,7 +439,6 @@ def fill_template(
                 cell_map, merge_map, current_row,
                 serial      = i + 1,
                 description = item.description.upper(),
-                size        = item.size.strip().upper() if item.size else None,
                 quantity    = item.quantity,
                 rate        = item.rate,
                 max_row     = ITEM_ROW_MAX,
@@ -466,7 +455,6 @@ def fill_template(
             cell_map, merge_map, ITEM_ROW_START,
             serial      = 1,
             description = request.description.upper(),
-            size        = request.size.strip().upper() if request.size else None,
             quantity    = request.quantity,
             rate        = request.rate,
             max_row     = ITEM_ROW_MAX,
