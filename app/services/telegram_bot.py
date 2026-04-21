@@ -13,7 +13,7 @@ import logging
 
 from telegram.ext import Application, MessageHandler, filters
 
-from app.services.telegram_handlers import handle_message
+from app.services.telegram_handlers import handle_message, handle_file
 
 logger = logging.getLogger(__name__)
 
@@ -32,19 +32,23 @@ class TelegramBot:
 
         self._app = Application.builder().token(self._token).build()
 
-        # Register handlers — add more here for future command groups
+        # Text + command messages → main router
         self._app.add_handler(
             MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message)
         )
         self._app.add_handler(
             MessageHandler(filters.COMMAND, handle_message)
         )
+        # Photo / document uploads → OCR handler
+        self._app.add_handler(
+            MessageHandler(filters.PHOTO | filters.Document.ALL, handle_file)
+        )
 
         await self._app.initialize()
         await self._app.start()
         await self._app.updater.start_polling(
             drop_pending_updates=True,
-            allowed_updates=["message"],
+            allowed_updates=["message"],   # covers text, photo, document, etc.
         )
         logger.info("Telegram bot polling started")
 

@@ -7,6 +7,7 @@ from pydantic import BaseModel
 
 class CompanyRecord(BaseModel):
     company_name:       str
+    aliases:            list[str] = []
     attn:               str = ""
     trn:                str = ""
     phone:              str = ""

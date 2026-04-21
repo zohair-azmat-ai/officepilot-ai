@@ -84,15 +84,28 @@ def get_all() -> list[CompanyRecord]:
     return [CompanyRecord(**r) for r in _load()]
 
 
+def _score(norm_q: str, q_words: set, candidate: str) -> int:
+    """Score a normalised query against a single normalised candidate string."""
+    norm_c = _normalize(candidate)
+    c_words = set(norm_c.split())
+    if norm_q == norm_c:
+        return 100
+    if norm_q in norm_c or norm_c in norm_q:
+        return 80
+    combined = q_words | c_words
+    return int(100 * len(q_words & c_words) / len(combined)) if combined else 0
+
+
 def lookup(query: str, max_results: int = 6) -> list[CompanyRecord]:
     """
     Return up to max_results records that best match the query string.
 
     Scoring (0–100):
-      100  exact normalised match
+      100  exact normalised match against company_name or any alias
        80  one string contains the other
-       30+ word-overlap score  (common words / total unique words)
+       30+ word-overlap score
 
+    Aliases are checked alongside the canonical name; the highest score wins.
     Only results with score >= 25 are returned.
     """
     if not query or not query.strip():
@@ -104,22 +117,33 @@ def lookup(query: str, max_results: int = 6) -> list[CompanyRecord]:
     scored: list[tuple[int, CompanyRecord]] = []
     for raw in _load():
         rec = CompanyRecord(**raw)
-        norm_n = _normalize(rec.company_name)
-        n_words = set(norm_n.split())
-
-        if norm_q == norm_n:
-            score = 100
-        elif norm_q in norm_n or norm_n in norm_q:
-            score = 80
-        else:
-            combined = q_words | n_words
-            score = int(100 * len(q_words & n_words) / len(combined)) if combined else 0
-
-        if score >= 25:
-            scored.append((score, rec))
+        best = _score(norm_q, q_words, rec.company_name)
+        for alias in rec.aliases:
+            best = max(best, _score(norm_q, q_words, alias))
+        if best >= 25:
+            scored.append((best, rec))
 
     scored.sort(key=lambda x: -x[0])
     return [rec for _, rec in scored[:max_results]]
+
+
+def resolve_company_name(query: str) -> str:
+    """Return the canonical company_name for query (alias or partial name).
+    Falls back to the query itself if no confident match is found."""
+    if not query or not query.strip():
+        return query
+    norm_q = _normalize(query)
+    # Exact alias match first (highest confidence)
+    for raw in _load():
+        rec = CompanyRecord(**raw)
+        for alias in rec.aliases:
+            if _normalize(alias) == norm_q:
+                return rec.company_name
+    # Fuzzy fallback
+    matches = lookup(query, max_results=1)
+    if matches:
+        return matches[0].company_name
+    return query
 
 
 def get_exact(company_name: str) -> CompanyRecord | None:

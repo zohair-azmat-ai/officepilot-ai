@@ -48,6 +48,16 @@ class Settings(BaseSettings):
     # Override by setting TEMPLATE_PATH in .env.
     TEMPLATE_PATH: str = _default_template_path()
 
+    # ── Ledger ─────────────────────────────────────────────────────────────────
+    # Root folder for per-company ledger Excel files.
+    # Sub-folder per year: G:\...\Ledger\2026\COMPANY NAME.xlsx
+    LEDGER_BASE_PATH: str = r"G:\NEW DATA 2021\DRIVE\Ledger\2026"
+
+    # ── Account Statements ─────────────────────────────────────────────────────
+    # Root folder for generated account statements.
+    # Auto sub-folders: G:\...\Account Statement\<YEAR>\<MM>\
+    STATEMENT_BASE_PATH: str = r"G:\NEW DATA 2021\DRIVE\Account Statement"
+
     # ── Server ─────────────────────────────────────────────────────────────────
     APP_HOST: str = "127.0.0.1"
     APP_PORT: int = 8000
@@ -161,7 +171,7 @@ class Settings(BaseSettings):
         ]
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=str(Path(__file__).parent.parent / ".env"),
         env_file_encoding="utf-8",
         extra="ignore",
     )

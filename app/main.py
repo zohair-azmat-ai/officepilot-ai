@@ -54,7 +54,7 @@ async def lifespan(app: FastAPI):
         from app.services.telegram_bot import start_bot
         try:
             await start_bot(settings.TELEGRAM_BOT_TOKEN)
-            logger.info("Telegram bot        : enabled and polling")
+            logger.info("Telegram bot        : enabled and polling started")
         except Exception as exc:
             logger.error("Telegram bot failed to start: %s", exc)
     else:

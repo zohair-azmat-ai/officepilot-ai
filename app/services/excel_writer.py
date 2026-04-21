@@ -255,6 +255,31 @@ def _safe_write(
 
 # ── Item row helpers ──────────────────────────────────────────────────────────
 
+# Max characters that fit in the description area (merged B:G).
+# Adjust if your template columns are wider or narrower.
+DESC_WRAP_CHARS = 60
+
+
+def _wrap_text(text: str, width: int) -> list[str]:
+    """Word-wrap text into lines of at most width characters."""
+    if len(text) <= width:
+        return [text]
+    words = text.split()
+    lines: list[str] = []
+    current = ""
+    for word in words:
+        if not current:
+            current = word
+        elif len(current) + 1 + len(word) <= width:
+            current += " " + word
+        else:
+            lines.append(current)
+            current = word
+    if current:
+        lines.append(current)
+    return lines if lines else [text]
+
+
 def _clear_item_rows(cell_map, merge_map) -> None:
     """Erase all data in the full item area (rows 20-35, columns A B H J L)."""
     for row in range(ITEM_ROW_START, ITEM_ROW_MAX + 1):
@@ -279,6 +304,54 @@ def _write_item_row(
     _safe_write(cell_map, merge_map, "J", row, rate)
     _safe_write(cell_map, merge_map, "L", row, line_amount)
     return line_amount
+
+
+def _write_item_block(
+    cell_map,
+    merge_map,
+    start_row: int,
+    serial: int,
+    description: str,
+    size: str | None,
+    quantity: float,
+    rate: float,
+    max_row: int,
+) -> tuple[float, int]:
+    """
+    Write one item, wrapping its description across consecutive rows.
+
+    start_row  : serial | desc line 1 | qty | rate | amount
+    start_row+1:        | desc line 2 |     |      |
+    ...
+    last_used  :        | size/spec   |     |      |   (if provided)
+
+    Returns (line_amount, next_available_row).
+    """
+    desc_lines = _wrap_text(description, DESC_WRAP_CHARS)
+    line_amount = round(quantity * rate, 2)
+
+    # First row — serial, first description line, qty, rate, amount
+    _safe_write(cell_map, merge_map, "A", start_row, serial)
+    _safe_write(cell_map, merge_map, "B", start_row, desc_lines[0])
+    _safe_write(cell_map, merge_map, "H", start_row, quantity)
+    _safe_write(cell_map, merge_map, "J", start_row, rate)
+    _safe_write(cell_map, merge_map, "L", start_row, line_amount)
+
+    current_row = start_row + 1
+
+    # Continuation description lines — description column only
+    for line in desc_lines[1:]:
+        if current_row > max_row:
+            break
+        _safe_write(cell_map, merge_map, "B", current_row, line)
+        current_row += 1
+
+    # Size / spec on the next available row after description
+    if size and current_row <= max_row:
+        _safe_write(cell_map, merge_map, "B", current_row, size)
+        current_row += 1
+
+    return line_amount, current_row
 
 
 # ── XML serialisation ─────────────────────────────────────────────────────────
@@ -360,53 +433,45 @@ def fill_template(
     # ── 8. Write item rows ────────────────────────────────────────────────────
     if request.items:
         # ── Multi-item mode ───────────────────────────────────────────────────
-        # Row 21 (sub-description row) is skipped because its H column is only
-        # 1.28pt wide — a number written there appears invisible.  All other
-        # item rows (22-35) have properly merged H:I (qty) and J:K (rate) cells.
-        max_items = len(_MULTI_ITEM_ROWS)
-        items_to_write = request.items[:max_items]
-
-        if len(request.items) > max_items:
-            import logging
-            logging.getLogger(__name__).warning(
-                "Request has %d items but template supports %d. "
-                "Extra items were dropped.",
-                len(request.items), max_items,
-            )
-
+        # Rows are allocated dynamically: each item uses as many consecutive
+        # rows as its description requires, then size/spec on the next row.
+        # Row 21 is safe for description overflow (only B:G is written there).
+        import logging as _log
         subtotal = 0.0
-        for i, item in enumerate(items_to_write):
-            row = _MULTI_ITEM_ROWS[i]
-            desc = item.description.upper()
-            if item.size:
-                desc = f"{item.description.upper()} ({item.size.upper()})"
-            line_amount = _write_item_row(
-                cell_map, merge_map, row,
+        current_row = ITEM_ROW_START
+        for i, item in enumerate(request.items):
+            if current_row > ITEM_ROW_MAX:
+                _log.getLogger(__name__).warning(
+                    "No more item rows after item %d — remaining items dropped.", i
+                )
+                break
+            line_amount, current_row = _write_item_block(
+                cell_map, merge_map, current_row,
                 serial      = i + 1,
-                description = desc,
+                description = item.description.upper(),
+                size        = item.size.strip().upper() if item.size else None,
                 quantity    = item.quantity,
                 rate        = item.rate,
+                max_row     = ITEM_ROW_MAX,
             )
             subtotal += line_amount
 
         subtotal = round(subtotal, 2)
 
     else:
-        # ── Single-item mode (HTML form submission) ───────────────────────────
-        subtotal = round(request.quantity * request.rate, 2)
-
-        _write_item_row(
+        # ── Single-item mode (HTML form / Telegram) ───────────────────────────
+        # Description wraps across rows 20, 21, 22 … as needed; size/spec
+        # is written immediately below the last description line.
+        line_amount, _ = _write_item_block(
             cell_map, merge_map, ITEM_ROW_START,
             serial      = 1,
             description = request.description.upper(),
+            size        = request.size.strip().upper() if request.size else None,
             quantity    = request.quantity,
             rate        = request.rate,
+            max_row     = ITEM_ROW_MAX,
         )
-
-        # Size / spec on row 21 (sub-description row, B21:G21 merged)
-        size_value = request.size.strip().upper() if request.size else None
-        _safe_write(cell_map, merge_map, "B", ITEM_ROW_START + 1,
-                    size_value if size_value else None)
+        subtotal = round(line_amount, 2)
 
     # ── 9. Write totals ───────────────────────────────────────────────────────
     tax   = round(request.tax, 2)

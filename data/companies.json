@@ -1,37 +1,65 @@
 [
   {
-    "company_name": "GULF EXTRUSION COMPANY LLC",
+    "company_name": "GULF EXTRUSIONS LLC",
+    "aliases": ["gulf extrusion", "gulf extrusions", "gulf extrusion company", "gulf"],
     "attn": "MR.VIJO",
     "trn": "100211945900003",
     "phone": "",
-    "fax": ""
-  },
-  {
-    "company_name": "QUANT GULF EQUIPMENT AND GENERAL MAINTENANCE LLC, DUBAI",
-    "attn": "MR.SAJID/MR.FAWAZ",
-    "trn": "100303601700003",
-    "phone": "04-8846146",
-    "fax": "04-8846830"
-  },
-  {
-    "company_name": "GLOBOL FOOD INDUSTRIES LLC",
-    "attn": "MR.ASIF",
-    "trn": "100025029800003",
-    "phone": "06-5332655",
-    "fax": ""
-  },
-  {
-    "company_name": "INNOBIT INDUSTRIES LLC, UMM AL QUWAIN - U.A.E.",
-    "attn": "MR.KINI",
-    "trn": "104010578300003",
-    "phone": "",
-    "fax": ""
+    "fax": "",
+    "payment_terms_days": 30
   },
   {
     "company_name": "AL ISLAMI FOODS FZE",
+    "aliases": ["al islami", "islami", "al islami foods"],
     "attn": "MR.NAEEM/MR.SHAFFI",
     "trn": "100239030800003",
     "phone": "06-5264998",
-    "fax": "06-5264997"
+    "fax": "06-5264997",
+    "payment_terms_days": 30
+  },
+  {
+    "company_name": "GLOBOL FOODS INDUSTRIES CO LLC",
+    "aliases": ["globol foods", "globol", "global foods", "globol food industries"],
+    "attn": "MR.ASIF",
+    "trn": "100025029800003",
+    "phone": "06-5332655",
+    "fax": "",
+    "payment_terms_days": 30
+  },
+  {
+    "company_name": "Quant Gulf Equipment and General Maintenance LLC",
+    "aliases": ["quant gulf", "quant", "quant gulf equipment", "quant gulf maintenance"],
+    "attn": "MR.SAJID/MR.FAWAZ",
+    "trn": "100303601700003",
+    "phone": "04-8846146",
+    "fax": "04-8846830",
+    "payment_terms_days": 30
+  },
+  {
+    "company_name": "TAYSEER ARAR FOOD INDUSTRIES CO LLC",
+    "aliases": ["tayseer arar food", "tayseer food", "tayseer arar"],
+    "attn": "",
+    "trn": "",
+    "phone": "",
+    "fax": "",
+    "payment_terms_days": 30
+  },
+  {
+    "company_name": "TAYSEER ARAR CONTAINERS MANUFACTURING CO LLC",
+    "aliases": ["tayseer arar containers", "tayseer containers", "tayseer container"],
+    "attn": "",
+    "trn": "",
+    "phone": "",
+    "fax": "",
+    "payment_terms_days": 30
+  },
+  {
+    "company_name": "INNOBIT INDUSTRIES LLC, UMM AL QUWAIN - U.A.E.",
+    "aliases": ["innobit", "innobit industries"],
+    "attn": "MR.KINI",
+    "trn": "104010578300003",
+    "phone": "",
+    "fax": "",
+    "payment_terms_days": 30
   }
 ]

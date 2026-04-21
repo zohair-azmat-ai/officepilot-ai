@@ -12,16 +12,18 @@ pinned: false
 
 # 🏢 OfficePilot AI
 
-**Local Windows automation for professional quotation generation, company memory, AR ledger, and Telegram bot integration.**
+**Self-hosted Windows business automation — quotations, ledger, statements, OCR, and document delivery via Telegram.**
 
 [![Python](https://img.shields.io/badge/Python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-009688?style=for-the-badge&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
-[![Electron](https://img.shields.io/badge/Desktop-Electron-47848F?style=for-the-badge&logo=electron&logoColor=white)](https://electronjs.org)
-[![Telegram](https://img.shields.io/badge/Telegram-Bot-2CA5E0?style=for-the-badge&logo=telegram&logoColor=white)](https://core.telegram.org/bots)
-[![Excel](https://img.shields.io/badge/Excel-Automation-217346?style=for-the-badge&logo=microsoftexcel&logoColor=white)](https://openpyxl.readthedocs.io)
-[![HuggingFace](https://img.shields.io/badge/HuggingFace-Ready-FFD21E?style=for-the-badge&logo=huggingface&logoColor=black)](https://huggingface.co/spaces)
-[![Windows](https://img.shields.io/badge/Windows-First-0078D6?style=for-the-badge&logo=windows&logoColor=white)](https://www.microsoft.com/windows)
-[![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)](LICENSE)
+[![Telegram Bot](https://img.shields.io/badge/Telegram-Bot-2CA5E0?style=for-the-badge&logo=telegram&logoColor=white)](https://core.telegram.org/bots)
+[![OCR Ready](https://img.shields.io/badge/OCR-Ready-FF6B35?style=for-the-badge&logo=googlelens&logoColor=white)](#-ocr-invoice-extraction)
+[![PDF Statements](https://img.shields.io/badge/PDF-Statements-E74C3C?style=for-the-badge&logo=adobeacrobatreader&logoColor=white)](#-account-statement-generation)
+[![Ledger](https://img.shields.io/badge/AR-Ledger-27AE60?style=for-the-badge&logo=microsoftexcel&logoColor=white)](#-customer-ledger--ar-module)
+[![Desktop App](https://img.shields.io/badge/Desktop-Electron-47848F?style=for-the-badge&logo=electron&logoColor=white)](#-desktop-app)
+[![Windows First](https://img.shields.io/badge/Windows-First-0078D6?style=for-the-badge&logo=windows&logoColor=white)](#-windows-auto-start)
+[![Local First](https://img.shields.io/badge/Storage-Local--First-8E44AD?style=for-the-badge&logo=files&logoColor=white)](#-local-first-storage)
+[![License](https://img.shields.io/badge/License-MIT-2ECC71?style=for-the-badge)](LICENSE)
 
 </div>
 
@@ -29,54 +31,38 @@ pinned: false
 
 ## 🎯 What Is This?
 
-OfficePilot AI is a **self-hosted, Windows-first business automation tool** that replaces manual quotation workflows with a smart backend + desktop app.
+OfficePilot AI is a **self-hosted, Windows-first office automation platform** built for small businesses that need professional-grade tools without cloud subscriptions or IT overhead.
 
-- Type a quotation command on your phone via **Telegram** — get an Excel + PDF back in seconds
-- Use the **desktop app** (Electron) for full form-based quotation creation
-- **Company memory** auto-fills ATTN, TRN, phone, and fax for known clients
-- **Ledger module** tracks invoices, payments, and outstanding balances
-- All data stays **100% local** — no cloud, no subscriptions
+- Send a quotation command from your **phone via Telegram** — get Excel + PDF back in seconds
+- Photograph an **invoice** and OCR extracts company, amount, and date automatically
+- Say **`send trade license`** and the bot fetches and delivers the document instantly
+- **Account statements** are generated as professional A4 PDFs with letterhead
+- Every file stays **100% local** on your Windows machine — no cloud, no SaaS
 
 ---
 
 ## 🗺️ Architecture
 
-```mermaid
-graph TB
-    subgraph Inputs
-        A["📱 Telegram\n(Mobile)"]
-        B["🖥️ Desktop App\n(Electron)"]
-        C["🌐 Browser\n(Web Form)"]
-    end
-
-    subgraph Backend ["⚙️ FastAPI Backend  ·  127.0.0.1:8000"]
-        D["🧠 Command Parser\n(NLP / Regex)"]
-        E["🏢 Company Memory\ncompanies.json"]
-        F["📋 Quotation Engine"]
-        G["📒 Ledger Module\nAR / Invoices"]
-        H["🤖 Telegram Bot\n(python-telegram-bot)"]
-    end
-
-    subgraph Output
-        I["📊 Excel File\n(.xlsx)"]
-        J["📄 PDF File\n(LibreOffice)"]
-        K["💬 Telegram Reply\n(summary + files)"]
-    end
-
-    A -->|text command| H
-    B -->|HTTP POST| F
-    C -->|HTTP POST| F
-
-    H --> D
-    D --> E
-    E -->|auto-fill| F
-    F --> I
-    I --> J
-    F --> G
-
-    H --> K
-    I --> K
-    J --> K
+```
+User (Mobile / Desktop)
+        │
+        ▼
+┌──────────────────────────────────────────────────────┐
+│            Telegram Bot  /  Desktop App (Electron)   │
+└──────────────────────┬───────────────────────────────┘
+                       │
+                       ▼
+┌──────────────────────────────────────────────────────┐
+│           FastAPI Backend  ·  127.0.0.1:8000         │
+│                                                      │
+│  Parser → Company Memory → Quotation Engine          │
+│         → Ledger Module  → Statement Generator       │
+│         → OCR Parser     → Document Fetcher          │
+└──────────────────────┬───────────────────────────────┘
+                       │
+                       ▼
+         Excel / PDF / Local Files on Windows Drive
+    (Quotation  ·  Ledger  ·  Statement  ·  Documents)
 ```
 
 ---
@@ -84,54 +70,165 @@ graph TB
 ## ✨ Features
 
 ### 📋 Quotation Generation
-- Sequential reference number detection (scans existing files)
-- Fill Excel template with client details, items, totals
+
+- Natural-language commands: `make quotation for COMPANY item 1: ...`
+- Sequential reference number auto-detection by scanning existing files
 - Multi-item quotations with auto-calculated subtotal + 5% VAT
+- Fills Excel template — company header, items, totals, ref number, date
+- Auto-exports PDF via LibreOffice headless
 - Windows-safe filenames: `18-04-2026 ref# 2705 GULF EXTRUSION.xlsx`
-- Auto PDF export via LibreOffice headless
+- Bot delivers both Excel and PDF via `sendDocument`
 
-### 🧠 Natural Language Quick Command
-Send plain English — get a quotation:
+**Example:**
 ```
-Create quotation for GULF EXTRUSION COMPANY LLC
-Item 1 FABRICATION OF SS ROLLER qty 1 rate 500
-Item 2 TEFLON ROUND BAR qty 2 rate 350
+make quotation for Gulf Extrusion
+item 1: SS roller fabrication, qty 2, price 500 each
+item 2: teflon round bar, qty 1, price 350 each
 ```
 
-### 🏢 Company Memory
-- Stores company name, ATTN, TRN, phone, fax, payment terms
-- Fuzzy matching — partial names work
-- Auto-fills form fields when a known company is typed
-- Pre-loaded with sample companies (edit `data/companies.json`)
+---
 
-### 📱 Telegram Bot
-- Send quotation commands from your mobile
-- Bot replies with: client, ref number, total amount
-- Sends both Excel and PDF files back via `sendDocument`
-- Only your configured chat ID can use it
-- Auto-starts with the backend
+### 🧠 Company Memory & Aliases
+
+- Stores company name, ATTN, TRN, phone, fax per client
+- Fuzzy / alias matching — `gulf` resolves to `GULF EXTRUSION COMPANY LLC`
+- Auto-fills all form fields when a known company is detected
+- Pre-loaded aliases: `gulf`, `islami`, `quant`, `globol`, `tayseer arar`, `tayseer containers`
+- Persisted in `data/companies.json`
+
+---
 
 ### 📒 Customer Ledger / AR Module
-- Invoice entry with auto due-date calculation
-- Payment recording with payment mode tracking
-- Status tracking: `UNPAID` / `PARTIALLY PAID` / `PAID` / `OVERDUE`
-- Company-wise collapsible ledger view
-- KPI cards: Total Invoiced, Received, Outstanding
+
+- Excel-based ledger file per company (`G:\...\Ledger\2026\COMPANY.xlsx`)
+- Tracks debit (invoiced), credit (paid), and running balance
+- Date-stamped entries with optional LPO number
+- Company alias resolution on every command
+
+```
+create ledger for gulf
+add ledger gulf invoice 2705 debit 5000
+add ledger gulf invoice 2705 debit 5000 lpo 45892
+ledger gulf
+balance gulf
+outstanding gulf
+```
+
+---
+
+### 💳 Payment Tracking
+
+- `payment received for COMPANY invoice NUMBER amount AMOUNT`
+- Logs credit entries to the company ledger
+- Instantly replies with updated outstanding balance
+- Optional `date DD-MM-YYYY` override
+
+---
+
+### 📊 Account Statement Generation
+
+- Professional A4 portrait PDF with full company letterhead
+- Columns: Date · Invoice No · LPO · Debit (AED) · Credit (AED) · Balance (AED)
+- Opening balance computed from all prior-period entries
+- Closing balance, amount-in-words footer (AED Fourteen Thousand Dirhams Only)
+- Signature block: *for DAR AL SALAM ENG. TURNING WORKS W/SHOP*
+- `fitToWidth=1`, explicit print area — single page, no split
+- Save path: `G:\...\Account Statement\YEAR\MM\COMPANY_YYYY-MM.xlsx / .pdf`
+
+```
+statement gulf april 2026
+statement gulf 04 2026 unpaid
+statement gulf april 2026 pdf
+```
+
+---
+
+### 🔍 OCR Invoice Extraction
+
+- Send a **photo or PDF** of any invoice to the Telegram bot
+- Extracts: company name, invoice number, date, total amount, LPO number
+- Preprocessing: EXIF rotation fix → grayscale → autocontrast → 2400px upscale → sharpen
+- Zone-based OCR: top-left for invoice number, top-right for date, bottom-right for amount
+- Template detection for Dar Al Salam / DTW invoices with seller/customer disambiguation
+- After extraction, bot prompts: **YES** to add to ledger · **NO** to cancel · `correct FIELD VALUE` to fix any field
+- PDF fallback via pdfplumber (works without Tesseract); photo OCR requires Tesseract
+
+---
+
+### 📎 Document Fetch
+
+Deliver any document stored in the official documents folder directly via Telegram:
+
+```
+send trade license
+send shed contract
+send municipality
+send doc2
+```
+
+- Case-insensitive partial filename matching
+- One match → sends file immediately: *"Sending: Trade License.pdf"*
+- Multiple matches → lists options and asks to be more specific
+- No match → friendly error message
+- Access locked to one fixed folder — no path traversal possible
+
+---
 
 ### 🖥️ Desktop App
+
 - Electron-based portable `.exe` — no install required
-- Auto-starts Python backend on launch
+- Auto-starts the Python backend on launch
 - Dark-themed modern UI
-- Full quotation form, Quick Command mode, Company Manager, Ledger tab
+- Tabs: Quotation Form · Quick Command · Company Manager · Ledger View
+
+---
+
+### 🪟 Windows Auto-Start
+
+- `install_task.ps1` registers a Windows Task Scheduler task
+- Backend (and Telegram bot) starts silently at every Windows login
+- `startup.log` captures backend output for debugging
+- No terminal window required
+
+---
+
+### 💾 Local-First Storage
+
+| Data | Location |
+|------|----------|
+| Quotation Excel + PDF | `G:\...\Quotation\YEAR\MM\` |
+| Company Ledgers | `G:\...\Ledger\2026\COMPANY.xlsx` |
+| Account Statements | `G:\...\Account Statement\YEAR\MM\` |
+| Official Documents | `G:\...\Offical Documents 2026\` |
+| Company Memory | `data/companies.json` |
+| Excel Template | `templates/quotation_template.xlsx` |
+
+Everything stays on your local drive. No cloud upload, no external API calls except Telegram bot messaging.
+
+---
+
+## 🆕 What's New — Latest Updates
+
+| Feature | Details |
+|---------|---------|
+| **Document Fetch** | `send FILENAME` delivers any file from the official docs folder via Telegram |
+| **Account Statements** | A4 portrait PDF with letterhead, LPO column, opening balance, amount-in-words, signature |
+| **OCR Invoice Parsing** | Photo/PDF → auto-extracted fields → one-tap ledger entry with correction support |
+| **Excel Ledger** | Per-company `.xlsx` ledger with LPO tracking and running balance |
+| **NL Quotation Input** | `make quotation for COMPANY\nitem 1: ...` multi-item natural-language format |
+| **Payment Tracking** | `payment received` command with immediate outstanding balance reply |
+| **Windows Auto-Start** | Task Scheduler integration via `install_task.ps1` |
 
 ---
 
 ## 🚀 Quick Start
 
 ### Prerequisites
+
 - **Python 3.11+** — [python.org/downloads](https://www.python.org/downloads/)
-- **Node.js 18+** (only for rebuilding the desktop app)
 - **LibreOffice** (optional, for PDF export) — [libreoffice.org](https://www.libreoffice.org/download/)
+- **Tesseract OCR** (optional, for invoice photo parsing) — [tesseract-ocr releases](https://github.com/tesseract-ocr/tesseract/releases)
+- **Node.js 18+** (only if rebuilding the desktop app)
 
 ### 1. Clone & install
 
@@ -139,86 +236,76 @@ Item 2 TEFLON ROUND BAR qty 2 rate 350
 git clone https://github.com/zohair-azmat-ai/officepilot-ai.git
 cd officepilot-ai
 python -m venv venv
-venv\Scripts\activate          # Windows
+venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
 ### 2. Configure
 
 ```bash
-cp .env.example .env
+copy .env.example .env
 ```
 
 Edit `.env`:
 ```env
 QUOTATION_BASE_PATH=G:\YOUR\QUOTATION\FOLDER
+LEDGER_BASE_PATH=G:\YOUR\LEDGER\FOLDER\2026
+STATEMENT_BASE_PATH=G:\YOUR\STATEMENT\FOLDER
 TEMPLATE_PATH=templates\quotation_template.xlsx
 APP_HOST=127.0.0.1
 APP_PORT=8000
 ```
 
-### 3. Generate Excel template (first time only)
-
-```bash
-python create_template.py
-```
-
-### 4. Run the backend
+### 3. Run the backend
 
 ```bash
 python run.py
 ```
 
-Open **http://127.0.0.1:8000** in your browser.  
+Open **http://127.0.0.1:8000** in your browser.
 API docs: **http://127.0.0.1:8000/docs**
 
 ---
 
 ## 📱 Telegram Bot Setup
 
-1. **Create your bot** — message [@BotFather](https://t.me/BotFather) on Telegram → `/newbot` → copy the token
+1. Message [@BotFather](https://t.me/BotFather) → `/newbot` → copy the token
+2. Message [@userinfobot](https://t.me/userinfobot) → copy your chat ID
+3. Add to `.env`:
+   ```env
+   TELEGRAM_ENABLED=true
+   TELEGRAM_BOT_TOKEN=your_token_here
+   TELEGRAM_ALLOWED_CHAT_IDS=your_chat_id_here
+   ```
+4. Restart the backend — the bot starts automatically.
 
-2. **Get your chat ID** — message [@userinfobot](https://t.me/userinfobot) → copy the number
+### Full command reference
 
-3. **Add to `.env`**:
-```env
-TELEGRAM_ENABLED=true
-TELEGRAM_BOT_TOKEN=your_token_here
-TELEGRAM_ALLOWED_CHAT_IDS=your_chat_id_here
 ```
+help                                              → show all commands
 
-4. **Restart the backend** — the bot starts automatically.
+make quotation for COMPANY                        → natural-language quotation
+item 1: description, qty N, price N each
+item 2: description, qty N, price N each
 
-### Sending commands
+quote for COMPANY description qty 1 rate N       → single-item quotation
 
-Single item:
+create ledger for COMPANY                         → create Excel ledger
+ledger COMPANY                                    → view ledger summary
+balance COMPANY                                   → check outstanding balance
+outstanding COMPANY                               → check outstanding balance
+add ledger COMPANY invoice N debit N              → record invoice
+add ledger COMPANY invoice N debit N lpo N        → record invoice + LPO number
+payment received for COMPANY invoice N amount N   → record payment received
+
+statement COMPANY MONTH YEAR                      → generate account statement
+statement COMPANY MONTH YEAR unpaid               → unpaid entries only
+statement COMPANY MONTH YEAR pdf                  → send as PDF
+
+send DOCUMENT NAME                                → fetch & deliver file from docs folder
+
+[send photo or PDF]                               → OCR extract → ledger entry
 ```
-Quote for ABB INDUSTRIES fabrication of hydraulic block qty 1 rate 950
-```
-
-Multi-item:
-```
-Create quotation for GULF EXTRUSION COMPANY LLC
-Item 1 FABRICATION OF SS ROLLER qty 1 rate 500
-Item 2 TEFLON ROUND BAR qty 2 rate 350
-```
-
-Bot replies with a summary message + sends both the Excel and PDF files.
-
----
-
-## 🖥️ Desktop App
-
-The portable Electron app auto-starts the Python backend when launched.
-
-**Build from source:**
-```bash
-cd desktop-app
-npm install
-npm run build:portable
-```
-
-Output: `desktop-app/dist/OfficePilot-AI-1.0.0-portable.exe`
 
 ---
 
@@ -227,51 +314,50 @@ Output: `desktop-app/dist/OfficePilot-AI-1.0.0-portable.exe`
 ```
 officepilot-ai/
 ├── app/
-│   ├── main.py                     # FastAPI app + lifespan (bot start/stop)
-│   ├── config.py                   # All settings, cell map, Telegram config
+│   ├── main.py                     # FastAPI app + bot lifespan
+│   ├── config.py                   # Settings, cell map, paths, Telegram config
 │   ├── api/
-│   │   ├── quotation.py            # POST /quotations/create, parse-command
-│   │   ├── companies.py            # GET/POST /companies (memory CRUD)
-│   │   └── ledger.py               # Invoices + payments + overview endpoints
+│   │   ├── quotation.py            # POST /quotations/create
+│   │   ├── companies.py            # GET/POST /companies
+│   │   └── ledger.py               # Ledger endpoints
 │   ├── schemas/
-│   │   ├── quotation.py            # QuotationCreateRequest/Response
-│   │   ├── command.py              # ParseCommandRequest/Response
+│   │   ├── quotation.py            # QuotationCreateRequest / Response
 │   │   ├── company.py              # CompanyRecord
-│   │   └── ledger.py               # Invoice, Payment, LedgerOverview
+│   │   └── ledger.py               # Ledger schemas
 │   └── services/
-│       ├── command_parser.py       # NLP regex parser (no LLM)
-│       ├── company_memory.py       # Fuzzy lookup + JSON persistence
-│       ├── quotation_service.py    # Orchestrator
+│       ├── command_parser.py       # NLP regex quotation parser
+│       ├── company_memory.py       # Fuzzy lookup + alias resolution
+│       ├── quotation_service.py    # Quotation orchestrator
 │       ├── excel_writer.py         # openpyxl template filler
 │       ├── file_naming.py          # Windows-safe filename builder
 │       ├── ref_parser.py           # Folder scanner for next ref number
-│       ├── pdf_export.py           # LibreOffice headless conversion
-│       ├── ledger_service.py       # AR CRUD + balance computation
+│       ├── pdf_export.py           # LibreOffice headless PDF conversion
+│       ├── ledger_excel.py         # Excel ledger CRUD + balance computation
+│       ├── statement_excel.py      # A4 account statement generator
+│       ├── ocr_parser.py           # Invoice OCR (pytesseract + pdfplumber)
+│       ├── file_fetcher.py         # Document folder search + send
 │       ├── telegram_bot.py         # Bot lifecycle (start/stop)
-│       ├── telegram_handlers.py    # Message routing + quotation handler
+│       ├── telegram_handlers.py    # Message routing + all command handlers
 │       └── telegram_sender.py      # send_text / send_document helpers
 ├── desktop-app/
 │   ├── main.js                     # Electron main (backend auto-start)
 │   ├── preload.js
-│   ├── renderer/
-│   │   ├── index.html              # Full SPA: Quotation, Ledger, Companies
-│   │   ├── app.js                  # All frontend logic
-│   │   └── style.css               # Dark theme styles
-│   └── package.json
+│   └── renderer/
+│       ├── index.html
+│       ├── app.js
+│       └── style.css
 ├── data/
-│   ├── companies.json              # Pre-loaded company memory
-│   ├── invoices.json               # AR invoices (starts empty)
-│   └── payments.json               # AR payments (starts empty)
+│   └── companies.json              # Company memory (aliases, TRN, ATTN, phone, fax)
 ├── templates/
-│   └── quotation_template.xlsx     # Excel template (your format)
+│   └── quotation_template.xlsx     # Excel quotation template
 ├── static/
 │   └── index.html                  # Web frontend (served by FastAPI)
-├── Dockerfile                      # Hugging Face Spaces / Docker deploy
+├── install_task.ps1                # Register Windows auto-start task
+├── start_backend_safe.cmd          # Safe backend launcher script
+├── Dockerfile                      # Docker / Hugging Face Spaces deploy
 ├── run.py                          # Dev launcher (with reload)
-├── run_prod.py                     # Production launcher (no reload)
 ├── requirements.txt
-├── .env.example                    # Config template (copy → .env)
-└── create_template.py              # One-time template generator
+└── .env.example                    # Config template (copy → .env)
 ```
 
 ---
@@ -286,53 +372,8 @@ officepilot-ai/
 | `GET`  | `/companies` | List all saved companies |
 | `GET`  | `/companies/lookup?q=` | Fuzzy company search |
 | `POST` | `/companies` | Upsert company record |
-| `POST` | `/ledger/invoices` | Create invoice |
-| `GET`  | `/ledger/invoices` | List all invoices |
-| `DELETE` | `/ledger/invoices/{id}` | Delete invoice |
-| `POST` | `/ledger/payments` | Record payment |
-| `GET`  | `/ledger/overview` | Full AR ledger with computed balances |
-| `GET`  | `/ledger/company/{name}` | Company-specific ledger |
 
 Full interactive docs: **http://127.0.0.1:8000/docs**
-
----
-
-## 🐳 Deploy to Hugging Face Spaces
-
-1. Fork this repository
-2. Create a new **Docker Space** on [huggingface.co/spaces](https://huggingface.co/spaces)
-3. Connect your fork
-4. Add Space secrets:
-   ```
-   QUOTATION_BASE_PATH=/app/output
-   TELEGRAM_ENABLED=true
-   TELEGRAM_BOT_TOKEN=your_token
-   TELEGRAM_ALLOWED_CHAT_IDS=your_chat_id
-   ```
-5. The Space will build from the `Dockerfile` and expose the API on port 7860
-
-> **Note:** The Telegram bot runs fully in the container. Excel/PDF files are saved to `/app/output` inside the Space.
-
----
-
-## 🪟 Windows Auto-Start
-
-To start the backend automatically at Windows login (no terminal needed):
-
-1. Edit `start_backend.vbs` with your actual Python and project paths
-2. Copy it to your Windows Startup folder:
-   ```
-   %APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\
-   ```
-3. The backend (and Telegram bot) will start silently at every login
-
----
-
-## 📸 Screenshots
-
-| Desktop App | Telegram Bot | Ledger View |
-|-------------|-------------|-------------|
-| *(screenshot placeholder)* | *(screenshot placeholder)* | *(screenshot placeholder)* |
 
 ---
 
@@ -347,6 +388,9 @@ pydantic-settings>=2.5.0
 python-dotenv>=1.0.1
 python-multipart>=0.0.9
 python-telegram-bot>=20.0
+pdfplumber>=0.11.0
+pytesseract>=0.3.10
+Pillow>=10.0.0
 ```
 
 ---
