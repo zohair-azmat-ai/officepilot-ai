@@ -12,6 +12,7 @@ Matching rules:
 
 import logging
 import re
+from difflib import SequenceMatcher
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -36,33 +37,57 @@ def _normalize(s: str) -> str:
     return re.sub(r"[\s_\-]+", " ", s).strip().lower()
 
 
-def search_docs(query: str) -> "tuple[list[Path], list[Path]]":
+def _fuzzy_score(query: str, stem: str) -> float:
+    """
+    Score how well `query` matches `stem` (both pre-normalized).
+    Returns 0.0–1.0. Uses substring check + word overlap + sequence similarity.
+    """
+    if query in stem:
+        return 1.0
+    q_words = query.split()
+    s_words = stem.split()
+    word_hits = sum(1 for w in q_words if any(w in sw for sw in s_words))
+    word_score = word_hits / max(len(q_words), 1)
+    seq_score  = SequenceMatcher(None, query, stem).ratio()
+    return max(word_score * 0.9, seq_score)
+
+
+def search_docs(query: str) -> "tuple[list[Path], list[Path], bool]":
     """
     Search DOCS_FOLDER for files matching `query`.
 
-    Matching: normalized query must appear anywhere in the normalized filename stem
-    (extension is ignored during matching).
-
-    Returns (matches, all_files):
-      matches   — list of Path objects that match the query
-      all_files — full list of files in the folder (for "no match" fallback message)
+    Returns (matches, all_files, is_fuzzy):
+      matches   — matching Path objects (exact first, then fuzzy fallback)
+      all_files — full list of files in the folder
+      is_fuzzy  — True when result came from fuzzy/typo matching
     """
     folder = _resolve_folder()
 
-    logger.info("DOCS_FOLDER path: %s", folder)
-    logger.info("DOCS_FOLDER exists: %s", folder.exists())
+    logger.info("DOCS_FOLDER path: %s  exists=%s", folder, folder.exists())
 
     if not folder.exists():
         logger.warning("Documents folder not found: %s", folder)
-        return [], []
+        return [], [], False
 
     all_files = [p for p in folder.iterdir() if p.is_file()]
-    logger.info("Files found in folder (%d): %s", len(all_files), [f.name for f in all_files])
+    logger.info("Files in folder (%d): %s", len(all_files), [f.name for f in all_files])
 
     q = _normalize(query)
     logger.info("Normalized query: %r", q)
 
-    matches = [f for f in all_files if q in _normalize(f.stem)]
-    logger.info("Matched files: %s", [f.name for f in matches])
+    # ── Exact substring match ─────────────────────────────────────────────────
+    exact = [f for f in all_files if q in _normalize(f.stem)]
+    if exact:
+        logger.info("Exact matches: %s", [f.name for f in exact])
+        return exact, all_files, False
 
-    return matches, all_files
+    # ── Fuzzy fallback ────────────────────────────────────────────────────────
+    scored = sorted(
+        ((f, _fuzzy_score(q, _normalize(f.stem))) for f in all_files),
+        key=lambda x: x[1],
+        reverse=True,
+    )
+    threshold = 0.45
+    fuzzy = [f for f, score in scored if score >= threshold]
+    logger.info("Fuzzy matches (threshold=%.2f): %s", threshold, [f.name for f in fuzzy[:5]])
+    return fuzzy[:3], all_files, bool(fuzzy)

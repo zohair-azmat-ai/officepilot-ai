@@ -117,33 +117,60 @@ def _extract_date(text: str) -> str:
         return m.group("date")
     return _date.today().strftime("%d-%m-%Y")
 
-# ── Help text ─────────────────────────────────────────────────────────────────
+# ── Help / Welcome text ───────────────────────────────────────────────────────
+
+_WELCOME = (
+    "👋 <b>Welcome to OfficePilot AI!</b>\n\n"
+    "I'm your smart business assistant. You can talk to me naturally:\n"
+    "<i>gulf ka outstanding kitna hai?</i>\n"
+    "<i>globol ka april statement bhejo</i>\n"
+    "<i>trade license bhejo</i>\n\n"
+    "📋 <b>Quotations</b> — make quotation for COMPANY\n"
+    "📊 <b>Ledger</b> — ledger COMPANY / outstanding COMPANY\n"
+    "💳 <b>Payments</b> — payment received for COMPANY invoice N amount X\n"
+    "📄 <b>Statements</b> — statement COMPANY april 2026\n"
+    "📎 <b>Documents</b> — send trade license\n\n"
+    "Type /help for the full command reference."
+)
 
 _HELP = (
-    "👋 <b>OfficePilot AI — Commands</b>\n\n"
+    "👋 <b>OfficePilot AI — Help</b>\n\n"
+    "💬 <b>Smart Chat (Natural Language)</b>\n"
+    "<i>gulf ka outstanding kitna hai?</i>\n"
+    "<i>globol ka april statement bhejo</i>\n"
+    "<i>trade license bhejo</i>\n"
+    "<i>quotation banana hai for islami</i>\n\n"
     "<b>── Quotation ──</b>\n"
     "<pre>make quotation for COMPANY\n"
     "item 1: description, qty 2, price 500 each\n"
     "item 2: description, qty 1, price 300 each</pre>\n"
-    "<pre>make quotation for COMPANY item 1 desc qty 2 price 500 each item 2 desc qty 1 price 300</pre>\n"
     "<pre>quote for COMPANY description qty 1 rate 500</pre>\n\n"
     "<b>── Ledger ──</b>\n"
-    "<pre>create ledger for gulf</pre>\n"
-    "<pre>ledger gulf</pre>\n"
-    "<pre>balance quant</pre>\n"
-    "<pre>outstanding islami</pre>\n"
-    "<pre>add ledger gulf invoice 1234 debit 5000</pre>\n"
-    "<pre>payment received for gulf invoice 1234 amount 5000</pre>\n\n"
+    "<pre>create ledger for gulf\n"
+    "ledger gulf\n"
+    "balance quant\n"
+    "outstanding islami\n"
+    "add ledger gulf invoice 1234 debit 5000\n"
+    "payment received for gulf invoice 1234 amount 5000</pre>\n\n"
     "<b>── Account Statement ──</b>\n"
-    "<pre>statement gulf april 2026</pre>\n"
-    "<pre>statement gulf 04 2026 unpaid</pre>\n"
-    "<pre>statement gulf april 2026 pdf</pre>\n\n"
+    "<pre>statement gulf april 2026\n"
+    "statement gulf 04 2026 unpaid\n"
+    "statement gulf april 2026 pdf</pre>\n\n"
     "<b>── Documents ──</b>\n"
-    "<pre>send trade license</pre>\n"
-    "<pre>send shed contract</pre>\n"
-    "<pre>send municipality</pre>\n\n"
-    "<i>Short aliases: gulf, islami, quant, globol, tayseer arar, tayseer containers</i>"
+    "<pre>send trade license\n"
+    "send municipality\n"
+    "send establishment card</pre>\n"
+    "<i>Typo-tolerant: 'send licens' → Trade License</i>\n\n"
+    "<i>Aliases: gulf, islami, quant, globol, tayseer arar, tayseer containers</i>"
 )
+
+# Greetings that get an immediate welcome reply (no OpenAI call)
+_GREET_EXACT = {
+    "hi", "hello", "hey", "salam", "salaam",
+    "assalam o alaikum", "assalamualaikum", "assalam alaikum",
+    "wa alaikum assalam", "how can you help me", "how can you help",
+    "what can you do", "what can you help with",
+}
 
 _UNAUTHORIZED = "⛔ Unauthorized."
 
@@ -192,9 +219,21 @@ async def handle_message(
     logger.info("MSG chat_id=%s  text=%.80r", chat_id, text)
     t = text.lower().strip()
 
+    # Session always available — direct routes also update active_company
+    session = _get_session(chat_id)
+
     # ── Direct route — bypass OpenAI for structured commands ─────────────────
     # Ordered longest-prefix first to avoid false matches.
-    direct = None
+
+    # Greetings and help — zero cost, instant reply
+    if t in _GREET_EXACT or t in ("help", "/help", "/start"):
+        if t in ("help", "/help", "/start"):
+            print(f"[DIRECT] help  text={text!r}", flush=True)
+            await send_text(bot, chat_id, _HELP)
+        else:
+            print(f"[DIRECT] greeting  text={text!r}", flush=True)
+            await send_text(bot, chat_id, _WELCOME)
+        return
 
     if t.startswith("payment received"):
         print(f"[DIRECT] payment  text={text!r}", flush=True)
@@ -245,7 +284,16 @@ async def handle_message(
         return
 
     if t.startswith("statement"):
-        print(f"[DIRECT] statement  text={text!r}", flush=True)
+        # Inject active_company if the command has no company token
+        parsed_check = _parse_statement_cmd(text)
+        if not parsed_check and session.get("active_company"):
+            tail = text.strip().split(None, 1)
+            if len(tail) > 1:
+                text = f"statement {session['active_company']} {tail[1]}"
+                t = text.lower()
+        elif parsed_check:
+            session["active_company"] = resolve_company_name(parsed_check["company_raw"])
+        print(f"[DIRECT] statement  text={text!r}  active_company={session.get('active_company')!r}", flush=True)
         try:
             await _handle_statement(text, chat_id, bot)
         except Exception as exc:
@@ -254,7 +302,23 @@ async def handle_message(
         return
 
     if t.split()[0] in ("ledger", "balance", "outstanding"):
-        print(f"[DIRECT] ledger/balance  text={text!r}", flush=True)
+        parts = t.split(None, 1)
+        if len(parts) == 1:
+            # No company — try session memory
+            active = session.get("active_company")
+            if active:
+                text = f"{parts[0]} {active}"
+                t = text.lower()
+            else:
+                await send_text(bot, chat_id,
+                    "❌ Which company?\n<pre>ledger COMPANY</pre>")
+                return
+        else:
+            raw_co = parts[1].strip()
+            if raw_co.lower().startswith("for "):
+                raw_co = raw_co[4:].strip()
+            session["active_company"] = resolve_company_name(raw_co)
+        print(f"[DIRECT] ledger  text={text!r}  active_company={session.get('active_company')!r}", flush=True)
         try:
             await _handle_ledger(text, chat_id, bot)
         except Exception as exc:
@@ -271,14 +335,8 @@ async def handle_message(
             await send_text(bot, chat_id, f"❌ Error:\n<code>{exc}</code>")
         return
 
-    if t in ("help", "/help", "/start"):
-        print(f"[DIRECT] help  text={text!r}", flush=True)
-        await send_text(bot, chat_id, _HELP)
-        return
-
     # ── AI route — natural language only ──────────────────────────────────────
-    print(f"[AI] routing  text={text!r}", flush=True)
-    session = _get_session(chat_id)
+    print(f"[AI] routing  text={text!r}  active_company={session.get('active_company')!r}", flush=True)
     action  = _ai_router.route(text, session["history"], session)
     print(f"[AI] action type={action.get('type')}", flush=True)
     logger.info("AI action: %s", action)
@@ -940,8 +998,9 @@ async def _handle_send_doc(text: str, chat_id: int, bot) -> None:
             "Example: <pre>send trade license</pre>")
         return
 
-    query             = parts[1].strip()
-    matches, all_files = search_docs(query)
+    query = parts[1].strip()
+    matches, all_files, is_fuzzy = search_docs(query)
+    print(f"[DIRECT] doc-search  query={query!r}  matches={[f.name for f in matches]}  fuzzy={is_fuzzy}", flush=True)
 
     if not matches:
         if all_files:
@@ -954,13 +1013,22 @@ async def _handle_send_doc(text: str, chat_id: int, bot) -> None:
                 "❌ Documents folder is empty or not accessible.")
         return
 
+    # Fuzzy match — auto-send best result with "Did you mean" notice
+    if is_fuzzy:
+        f = matches[0]
+        logger.info("Fuzzy doc match: %r → %s", query, f.name)
+        await send_text(bot, chat_id, f"💡 Did you mean: <b>{f.name}</b>? Sending now…")
+        await send_document(bot, chat_id, str(f), f.name)
+        return
+
     if len(matches) == 1:
         f = matches[0]
+        logger.info("Exact doc match: %r → %s", query, f.name)
         await send_text(bot, chat_id, f"📎 Sending: <b>{f.name}</b>")
         await send_document(bot, chat_id, str(f), f.name)
         return
 
-    # Multiple matches — list options
+    # Multiple exact matches — list options
     names = "\n".join(f"• {m.name}" for m in matches[:10])
     await send_text(bot, chat_id,
         f"📂 Multiple files found for <b>{query}</b>:\n\n{names}\n\n"
