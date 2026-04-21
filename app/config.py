@@ -147,6 +147,11 @@ class Settings(BaseSettings):
         r"C:\Program Files\LibreOffice 24\program\soffice.exe",
     ]
 
+    # ── Anthropic / AI Router ──────────────────────────────────────────────────
+    # Get your key from https://console.anthropic.com/
+    # Required for the conversational AI layer (claude-haiku-4-5-20251001).
+    ANTHROPIC_API_KEY: str = ""
+
     # ── Telegram Bot ───────────────────────────────────────────────────────────
     # Get your token from @BotFather on Telegram.
     TELEGRAM_BOT_TOKEN: str = ""

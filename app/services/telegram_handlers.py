@@ -57,6 +57,24 @@ _STMT_MONTH_NAMES = [
 # Keys per entry: company, invoice, date, amount, lpo
 _pending_ocr: dict[int, dict] = {}
 
+# ── Conversational session state (chat_id → session dict) ────────────────────
+# Persists within a single backend process lifetime (resets on restart).
+_sessions: dict[int, dict] = {}
+
+
+def _get_session(chat_id: int) -> dict:
+    if chat_id not in _sessions:
+        _sessions[chat_id] = {"history": [], "active_company": None}
+    return _sessions[chat_id]
+
+
+def _update_history(session: dict, user_msg: str, assistant_summary: str) -> None:
+    session["history"].append({"role": "user",      "content": user_msg})
+    session["history"].append({"role": "assistant", "content": assistant_summary})
+    # Keep last 30 turns (60 messages) to stay within context limits
+    if len(session["history"]) > 60:
+        session["history"] = session["history"][-60:]
+
 # ── Compiled patterns ─────────────────────────────────────────────────────────
 
 # payment received for COMPANY invoice NUMBER amount AMOUNT
@@ -178,94 +196,22 @@ async def handle_message(
             return
         # Otherwise fall through to normal routing
 
-    first_word = text.strip().lower().split()[0] if text.strip() else ""
-    t = text.lower()
+    logger.info("MSG chat_id=%s  text=%.80r", chat_id, text)
 
-    print("ROUTE:", first_word, flush=True)
-    logger.info("ROUTE: %r  full=%.80r", first_word, text)
+    # ── Route through AI assistant ────────────────────────────────────────────
+    from app.services import ai_router as _ai_router
 
-    if first_word in ("help", "/help", "/start"):
-        await send_text(bot, chat_id, _HELP)
-        return
+    session = _get_session(chat_id)
+    action  = _ai_router.route(text, session["history"], session)
 
-    if first_word == "create":
-        if t.startswith("create ledger"):
-            try:
-                await _handle_create_ledger(text, chat_id, bot)
-            except Exception as exc:
-                logger.exception("create ledger error")
-                await send_text(bot, chat_id, f"❌ Error:\n<code>{exc}</code>")
-        else:
-            await send_text(bot, chat_id, "❌ Invalid command. Send <b>help</b>.")
-        return
+    try:
+        summary = await _dispatch_ai_action(action, text, chat_id, context, session)
+    except Exception as exc:
+        logger.exception("Dispatch error for action=%s", action.get("type"))
+        await send_text(bot, chat_id, f"❌ Error:\n<code>{exc}</code>")
+        summary = f"[error: {exc}]"
 
-    if first_word in ("ledger", "balance", "outstanding"):
-        try:
-            await _handle_ledger(text, chat_id, bot)
-        except Exception as exc:
-            logger.exception("ledger error")
-            await send_text(bot, chat_id, f"❌ Error:\n<code>{exc}</code>")
-        return
-
-    if t.startswith("payment received"):
-        try:
-            await _handle_payment(text, chat_id, bot)
-        except Exception as exc:
-            logger.exception("payment error")
-            await send_text(bot, chat_id, f"❌ Error:\n<code>{exc}</code>")
-        return
-
-    if first_word == "add":
-        if t.startswith("add ledger"):
-            try:
-                await _handle_add_debit(text, chat_id, bot)
-            except Exception as exc:
-                logger.exception("add ledger error")
-                await send_text(bot, chat_id, f"❌ Error:\n<code>{exc}</code>")
-        else:
-            await send_text(bot, chat_id, "❌ Invalid command. Send <b>help</b>.")
-        return
-
-    if first_word == "make":
-        if _re.match(r"make\s+(?:quotation|quote)\s+for\b", t):
-            try:
-                await _handle_nl_quotation(text, chat_id, context)
-            except Exception as exc:
-                logger.exception("NL quotation error")
-                await send_text(bot, chat_id, f"❌ Error:\n<code>{exc}</code>")
-        else:
-            await send_text(bot, chat_id, "❌ Invalid command. Send <b>help</b>.")
-        return
-
-    if first_word == "send":
-        try:
-            await _handle_send_doc(text, chat_id, bot)
-        except Exception as exc:
-            logger.exception("send doc error")
-            await send_text(bot, chat_id, f"❌ Error:\n<code>{exc}</code>")
-        return
-
-    if first_word == "statement":
-        try:
-            await _handle_statement(text, chat_id, bot)
-        except Exception as exc:
-            logger.exception("statement error")
-            await send_text(bot, chat_id, f"❌ Error:\n<code>{exc}</code>")
-        return
-
-    if first_word in ("quote", "quotation"):
-        # NL format detected by presence of "item N" blocks
-        if _re.search(r"\bitem\s*\d+\b", text, _re.I):
-            try:
-                await _handle_nl_quotation(text, chat_id, context)
-            except Exception as exc:
-                logger.exception("NL quotation error")
-                await send_text(bot, chat_id, f"❌ Error:\n<code>{exc}</code>")
-        else:
-            await _handle_quotation(text, chat_id, context)
-        return
-
-    await send_text(bot, chat_id, "❌ Invalid command. Send <b>help</b> for usage.")
+    _update_history(session, text, summary)
 
 
 async def _safe(bot, chat_id: int, coro):
@@ -275,6 +221,107 @@ async def _safe(bot, chat_id: int, coro):
     except Exception as exc:
         logger.exception("Handler error")
         await send_text(bot, chat_id, f"❌ Error:\n<code>{exc}</code>")
+
+
+# ── AI action dispatcher ──────────────────────────────────────────────────────
+
+_AI_MONTH_NAMES = [
+    "", "january", "february", "march", "april", "may", "june",
+    "july", "august", "september", "october", "november", "december",
+]
+
+
+async def _dispatch_ai_action(
+    action: dict,
+    original_text: str,
+    chat_id: int,
+    context: "ContextTypes.DEFAULT_TYPE",
+    session: dict,
+) -> str:
+    """
+    Translate an ai_router action dict into a call to the appropriate handler.
+    Returns a brief text summary stored in session history so Claude has context.
+    """
+    bot   = context.bot
+    atype = action.get("type", "error")
+
+    # ── Passthrough chat / error ──────────────────────────────────────────────
+    if atype in ("chat", "error"):
+        reply = action.get("reply", "")
+        await send_text(bot, chat_id, reply)
+        return reply
+
+    # ── Ledger query ──────────────────────────────────────────────────────────
+    if atype == "ledger":
+        company = action.get("company", "")
+        session["active_company"] = company
+        await _handle_ledger(f"ledger {company}", chat_id, bot)
+        return f"[showed ledger for {company}]"
+
+    # ── Add debit entry ───────────────────────────────────────────────────────
+    if atype == "add_entry":
+        company = action.get("company", "")
+        invoice = action.get("invoice", "")
+        amount  = action.get("amount", 0)
+        lpo     = action.get("lpo", "")
+        session["active_company"] = company
+        lpo_part = f" lpo {lpo}" if lpo else ""
+        cmd = f"add ledger {company} invoice {invoice} debit {amount}{lpo_part}"
+        await _handle_add_debit(cmd, chat_id, bot)
+        return f"[added debit {company} inv={invoice} AED {amount}]"
+
+    # ── Record payment ────────────────────────────────────────────────────────
+    if atype == "payment":
+        company = action.get("company", "")
+        invoice = action.get("invoice", "")
+        amount  = action.get("amount", 0)
+        date    = action.get("date", "")
+        session["active_company"] = company
+        date_part = f" date {date}" if date else ""
+        cmd = f"payment received for {company} invoice {invoice} amount {amount}{date_part}"
+        await _handle_payment(cmd, chat_id, bot)
+        return f"[payment {company} inv={invoice} AED {amount}]"
+
+    # ── Account statement ─────────────────────────────────────────────────────
+    if atype == "statement":
+        company = action.get("company", "")
+        month   = int(action.get("month", 1))
+        year    = int(action.get("year", 2026))
+        mode    = action.get("mode", "full")
+        session["active_company"] = company
+        month_name = _AI_MONTH_NAMES[month] if 1 <= month <= 12 else str(month)
+        cmd = f"statement {company} {month_name} {year} {mode}"
+        await _handle_statement(cmd, chat_id, bot)
+        return f"[statement {company} {month_name} {year}]"
+
+    # ── Document fetch ────────────────────────────────────────────────────────
+    if atype == "document":
+        query = action.get("query", "")
+        await _handle_send_doc(f"send {query}", chat_id, bot)
+        return f"[sent document: {query}]"
+
+    # ── Quotation ─────────────────────────────────────────────────────────────
+    if atype == "quotation":
+        company = action.get("company", "")
+        items   = action.get("items", [])
+        session["active_company"] = company
+        lines = [f"make quotation for {company}"]
+        for i, it in enumerate(items, 1):
+            desc = it.get("description", "item")
+            qty  = it.get("qty", 1)
+            rate = it.get("rate", 0)
+            lines.append(f"item {i}: {desc}, qty {qty}, price {rate} each")
+        cmd = "\n".join(lines)
+        await _handle_nl_quotation(cmd, chat_id, context)
+        return f"[quotation for {company} {len(items)} items]"
+
+    # ── Create ledger (handle if Claude somehow routes here) ──────────────────
+    if atype == "create_ledger":
+        company = action.get("company", "")
+        await _handle_create_ledger(f"create ledger for {company}", chat_id, bot)
+        return f"[created ledger for {company}]"
+
+    return "[unknown action]"
 
 
 # ── Create ledger handler ─────────────────────────────────────────────────────
