@@ -56,10 +56,13 @@ _SHEET_ENTRY = "xl/worksheets/sheet1.xml"
 ITEM_ROW_START = 20
 ITEM_ROW_MAX   = 35
 
-# Row 21 is a sub-description row where H21 is only 1.28pt wide (invisible).
-# Writing qty there makes it appear blank. Skip it for multi-item mode so
-# all item rows use properly merged H:I (qty) and J:K (rate) cells.
+# Row 21 is a sub-description row where the H column is only 1.28pt wide.
+# Writing qty there makes it invisible — skip it for multi-item mode.
+# Each entry in this list is a fully-formatted item row (correct merges/borders).
 _MULTI_ITEM_ROWS = [20] + list(range(22, 36))   # 15 items max
+
+# Approximate row height per line of wrapped text (points, ~11pt font)
+_ROW_HEIGHT_PER_LINE = 20.25
 
 
 # ── Amount-in-words ───────────────────────────────────────────────────────────
@@ -192,6 +195,27 @@ def _build_cell_map(root) -> dict[tuple[int, int], ET.Element]:
     return cell_map
 
 
+# ── Row map (for height adjustment) ──────────────────────────────────────────
+
+def _build_row_map(root) -> dict[int, ET.Element]:
+    """Return row_num → <row> element for every row in sheetData."""
+    row_map: dict[int, ET.Element] = {}
+    sheet_data = root.find(f"{{{_NS_MAIN}}}sheetData")
+    if sheet_data is not None:
+        for row_el in sheet_data.findall(f"{{{_NS_MAIN}}}row"):
+            rnum = int(row_el.attrib.get("r", 0))
+            row_map[rnum] = row_el
+    return row_map
+
+
+def _set_row_height(row_map: dict, row_num: int, height: float) -> None:
+    """Set a custom row height (points) directly on the <row> element."""
+    row_el = row_map.get(row_num)
+    if row_el is not None:
+        row_el.set("ht", f"{height:.2f}")
+        row_el.set("customHeight", "1")
+
+
 # ── Cell value setters ────────────────────────────────────────────────────────
 
 def _set_text(cell_el: ET.Element, value: str) -> None:
@@ -288,6 +312,40 @@ def _clear_item_rows(cell_map, merge_map) -> None:
     for row in range(ITEM_ROW_START, ITEM_ROW_MAX + 1):
         for col in ("A", "B", "H", "J", "L"):
             _safe_write(cell_map, merge_map, col, row, None)
+
+
+def _write_multi_item_row(
+    cell_map,
+    merge_map,
+    row_map: dict,
+    row: int,
+    serial: int,
+    description: str,
+    quantity: float,
+    rate: float,
+) -> float:
+    """
+    Write one item into a single pre-formatted template row.
+
+    The full description is placed in cell B (one cell, Excel wrapText handles
+    the visual wrap).  Row height is set to fit the estimated wrapped lines so
+    the text is fully visible in PDF output.
+
+    Returns the computed line amount.
+    """
+    line_amount = round(quantity * rate, 2)
+    _safe_write(cell_map, merge_map, "A", row, serial)
+    _safe_write(cell_map, merge_map, "B", row, description)
+    _safe_write(cell_map, merge_map, "H", row, _fmt_qty(quantity))
+    _safe_write(cell_map, merge_map, "J", row, rate)
+    _safe_write(cell_map, merge_map, "L", row, line_amount)
+
+    # Set row height to accommodate wrapped description text
+    wrapped_lines = max(1, len(_wrap_text(description, DESC_WRAP_CHARS)))
+    height = round(wrapped_lines * _ROW_HEIGHT_PER_LINE, 2)
+    _set_row_height(row_map, row, height)
+
+    return line_amount
 
 
 def _write_item_row(
@@ -404,6 +462,7 @@ def fill_template(
     # ── 4. Build maps ─────────────────────────────────────────────────────────
     merge_map = _build_merge_map(root)
     cell_map  = _build_cell_map(root)
+    row_map   = _build_row_map(root)
 
     # ── 5. Clear stale header / footer data from the template ─────────────────
     for coord in settings.CELLS_TO_CLEAR:
@@ -429,25 +488,25 @@ def fill_template(
     # ── 8. Write item rows ────────────────────────────────────────────────────
     if request.items:
         # ── Multi-item mode ───────────────────────────────────────────────────
-        # Rows are allocated dynamically: each item uses as many consecutive
-        # rows as its description requires, then size/spec on the next row.
-        # Row 21 is safe for description overflow (only B:G is written there).
-        import logging as _log
+        # Each item occupies exactly ONE row from _MULTI_ITEM_ROWS (row 21 is
+        # intentionally skipped — its H column is only 1.28pt wide, making qty
+        # invisible).  The full description is placed in one B cell and the row
+        # height is set to fit the wrapped text so nothing collides or overlaps.
         subtotal = 0.0
-        current_row = ITEM_ROW_START
         for i, item in enumerate(request.items):
-            if current_row > ITEM_ROW_MAX:
-                _log.getLogger(__name__).warning(
-                    "No more item rows after item %d — remaining items dropped.", i
-                )
+            if i >= len(_MULTI_ITEM_ROWS):
+                logger.warning("No more item rows after item %d — remaining items dropped.", i)
                 break
-            line_amount, current_row = _write_item_block(
-                cell_map, merge_map, current_row,
+            row = _MULTI_ITEM_ROWS[i]
+            desc = item.description.upper()
+            logger.debug("Item %d → row %d  desc=%r  qty=%s  rate=%s",
+                         i + 1, row, desc, item.quantity, item.rate)
+            line_amount = _write_multi_item_row(
+                cell_map, merge_map, row_map, row,
                 serial      = i + 1,
-                description = item.description.upper(),
+                description = desc,
                 quantity    = item.quantity,
                 rate        = item.rate,
-                max_row     = ITEM_ROW_MAX,
             )
             subtotal += line_amount
 
@@ -455,15 +514,15 @@ def fill_template(
 
     else:
         # ── Single-item mode (HTML form / Telegram) ───────────────────────────
-        # Description wraps across rows 20, 21, 22 … as needed; size/spec
-        # is written immediately below the last description line.
-        line_amount, _ = _write_item_block(
-            cell_map, merge_map, ITEM_ROW_START,
+        # Use the same single-row approach for consistency: full description in
+        # one B cell with row height set to fit.
+        desc = request.description.upper()
+        line_amount = _write_multi_item_row(
+            cell_map, merge_map, row_map, ITEM_ROW_START,
             serial      = 1,
-            description = request.description.upper(),
+            description = desc,
             quantity    = request.quantity,
             rate        = request.rate,
-            max_row     = ITEM_ROW_MAX,
         )
         subtotal = round(line_amount, 2)
 
