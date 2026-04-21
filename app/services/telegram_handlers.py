@@ -96,6 +96,15 @@ _CREATE_LEDGER_RE = _re.compile(
 # optional LPO anywhere in the command: "lpo 12345" or "lpo no 12345"
 _LPO_RE = _re.compile(r"\blpo\s+(?:no\.?\s+)?(?P<lpo>\S+)", _re.I)
 
+# Invoice command: "make invoice for COMPANY"
+_INV_HDR_RE = _re.compile(
+    r"make\s+invoice\s+for\s+(.+?)(?=\s+item\s*\d+\b|\n|$)",
+    _re.I,
+)
+
+# DO number: "do 09922" on its own line or inline
+_DO_RE = _re.compile(r"(?:^|\s)do\s+([^\s\n]+)", _re.I | _re.M)
+
 # OCR correction: "correct invoice 1234"  /  "correct company gulf"
 _CORRECT_RE = _re.compile(
     r"correct\s+(?P<field>invoice|date|amount|lpo|company)\s+(?P<value>.+)",
@@ -323,6 +332,15 @@ async def handle_message(
             await _handle_ledger(text, chat_id, bot)
         except Exception as exc:
             logger.exception("ledger error")
+            await send_text(bot, chat_id, f"❌ Error:\n<code>{exc}</code>")
+        return
+
+    if t.startswith("make invoice for"):
+        print(f"[DIRECT] invoice  text={text!r}", flush=True)
+        try:
+            await _handle_invoice(text, chat_id, context)
+        except Exception as exc:
+            logger.exception("invoice error")
             await send_text(bot, chat_id, f"❌ Error:\n<code>{exc}</code>")
         return
 
@@ -984,6 +1002,102 @@ async def _handle_nl_quotation(
                                f"📄 {result.filename.replace('.xlsx', '.pdf')}"):
             return
     await send_document(bot, chat_id, result.excel_path, f"📊 {result.filename}")
+
+
+# ── Invoice handler ───────────────────────────────────────────────────────────
+
+async def _handle_invoice(
+    text: str,
+    chat_id: int,
+    context: ContextTypes.DEFAULT_TYPE,
+) -> None:
+    from app.services.invoice_service import create_invoice
+    bot = context.bot
+
+    # Parse company name
+    hdr_m = _INV_HDR_RE.search(text)
+    if not hdr_m:
+        await send_text(bot, chat_id,
+            "❌ Format:\n"
+            "<pre>make invoice for COMPANY\n"
+            "item 1: description, qty N, price N each\n"
+            "lpo 142601885\n"
+            "do 09922</pre>")
+        return
+
+    raw_company = hdr_m.group(1).strip().rstrip(",")
+    company     = resolve_company_name(raw_company)
+
+    # Parse LPO and DO numbers
+    lpo_m = _LPO_RE.search(text)
+    do_m  = _DO_RE.search(text)
+    lpo   = lpo_m.group("lpo").strip() if lpo_m else ""
+    do_no = do_m.group(1).strip()      if do_m  else ""
+
+    # Parse items — reuse the same NL item parser as quotation
+    # Swap "invoice" → "quotation" so _parse_nl_quotation's header regex matches
+    proxy_text = _re.sub(r"\bmake\s+invoice\s+for\b", "make quotation for", text, flags=_re.I)
+    nl = _parse_nl_quotation(proxy_text)
+
+    if not nl or not nl["items"]:
+        await send_text(bot, chat_id,
+            "❌ Could not parse items. Format:\n"
+            "<pre>make invoice for COMPANY\n"
+            "item 1: description, qty N, price N each</pre>")
+        return
+
+    items_dicts = [
+        {"description": it["description"], "quantity": it["qty"], "rate": it["rate"]}
+        for it in nl["items"]
+    ]
+
+    await send_text(bot, chat_id, f"🧾 Generating invoice for <b>{company}</b>…")
+
+    # Company memory enrichment
+    attn = trn = ""
+    matches = company_lookup(company, max_results=1)
+    if matches:
+        best = matches[0]
+        attn, trn = best.attn, best.trn
+        company = best.company_name
+
+    result = create_invoice(
+        client_name=company,
+        items=items_dicts,
+        lpo=lpo,
+        do_no=do_no,
+        attn=attn,
+        trn=trn,
+    )
+
+    # Build reply
+    item_lines = "\n".join(
+        f"  {i+1}. {it['description']}  ×{int(it['quantity'])}  @ AED {it['rate']:,.2f}"
+        for i, it in enumerate(items_dicts)
+    )
+    lpo_line   = f"\nLPO:      <code>{lpo}</code>"   if lpo   else ""
+    do_line    = f"\nDO:       <code>{do_no}</code>"  if do_no else ""
+    pdf_line   = "📄 PDF: ready" if result["pdf_status"] == "created" else "📄 PDF: not available"
+
+    reply = (
+        "✅ <b>Invoice Created</b>\n\n"
+        f"Invoice No: <code>{result['invoice_no']}</code>\n"
+        f"Client:     <b>{company}</b>\n"
+        f"{lpo_line}{do_line}\n\n"
+        f"Items:\n{item_lines}\n\n"
+        f"Subtotal: AED {result['subtotal']:,.2f}\n"
+        f"VAT 5%:   AED {result['tax']:,.2f}\n"
+        f"Total:    <b>AED {result['total']:,.2f}</b>\n"
+        f"{pdf_line}"
+    )
+    await send_text(bot, chat_id, reply)
+
+    if result["pdf_status"] == "created" and result["pdf_path"]:
+        fname = result["filename"].replace(".xlsx", ".pdf")
+        if await send_document(bot, chat_id, result["pdf_path"], f"📄 {fname}"):
+            return
+
+    await send_document(bot, chat_id, result["excel_path"], f"📊 {result['filename']}")
 
 
 # ── Document fetch ────────────────────────────────────────────────────────────

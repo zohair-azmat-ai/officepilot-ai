@@ -15,6 +15,15 @@ from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+def _default_invoice_template_path() -> str:
+    resource_dir = os.environ.get('OFFICEPILOT_RESOURCE_DIR')
+    if resource_dir:
+        return str(Path(resource_dir) / 'templates' / 'invoice_template.xlsx')
+    if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+        return str(Path(sys._MEIPASS) / 'templates' / 'invoice_template.xlsx')
+    return str(Path(__file__).parent.parent / 'templates' / 'invoice_template.xlsx')
+
+
 def _default_template_path() -> str:
     """
     Resolve the template path that works in all three execution contexts:
@@ -47,6 +56,13 @@ class Settings(BaseSettings):
     # Auto-resolved for dev / packaged / PyInstaller contexts (see above).
     # Override by setting TEMPLATE_PATH in .env.
     TEMPLATE_PATH: str = _default_template_path()
+
+    # ── Invoice ────────────────────────────────────────────────────────────────
+    # Path to your invoice Excel template.
+    INVOICE_TEMPLATE_PATH: str = _default_invoice_template_path()
+
+    # Root folder for invoices — year/month sub-folders created automatically.
+    INVOICE_BASE_PATH: str = r"G:\NEW DATA 2021\DRIVE\Invoice"
 
     # ── Ledger ─────────────────────────────────────────────────────────────────
     # Root folder for per-company ledger Excel files.

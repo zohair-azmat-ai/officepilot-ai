@@ -34,6 +34,7 @@ Template layout (rows)
   Row 40  L40  ← Total amount (bottom copy, merged L40:L41)
 """
 
+import logging
 import re
 import zipfile
 import xml.etree.ElementTree as ET
@@ -41,6 +42,8 @@ from pathlib import Path
 
 from app.config import settings
 from app.schemas.quotation import QuotationCreateRequest
+
+logger = logging.getLogger(__name__)
 
 # ── xlsx / SpreadsheetML namespace ────────────────────────────────────────────
 
