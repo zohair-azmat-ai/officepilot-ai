@@ -189,15 +189,98 @@ async def handle_message(
             return
         # Otherwise fall through to normal routing
 
-    print(f"[AI] incoming chat_id={chat_id} text={text!r}", flush=True)
     logger.info("MSG chat_id=%s  text=%.80r", chat_id, text)
+    t = text.lower().strip()
 
-    # ── Route ALL messages through AI assistant ───────────────────────────────
+    # ── Direct route — bypass OpenAI for structured commands ─────────────────
+    # Ordered longest-prefix first to avoid false matches.
+    direct = None
+
+    if t.startswith("payment received"):
+        print(f"[DIRECT] payment  text={text!r}", flush=True)
+        try:
+            await _handle_payment(text, chat_id, bot)
+        except Exception as exc:
+            logger.exception("payment error")
+            await send_text(bot, chat_id, f"❌ Error:\n<code>{exc}</code>")
+        return
+
+    if t.startswith("add ledger"):
+        print(f"[DIRECT] add ledger  text={text!r}", flush=True)
+        try:
+            await _handle_add_debit(text, chat_id, bot)
+        except Exception as exc:
+            logger.exception("add ledger error")
+            await send_text(bot, chat_id, f"❌ Error:\n<code>{exc}</code>")
+        return
+
+    if t.startswith("make quotation for") or t.startswith("make quote for"):
+        print(f"[DIRECT] nl-quotation  text={text!r}", flush=True)
+        try:
+            await _handle_nl_quotation(text, chat_id, context)
+        except Exception as exc:
+            logger.exception("nl quotation error")
+            await send_text(bot, chat_id, f"❌ Error:\n<code>{exc}</code>")
+        return
+
+    if t.startswith("quote for") or t.startswith("quotation for"):
+        print(f"[DIRECT] quotation  text={text!r}", flush=True)
+        if _re.search(r"\bitem\s*\d+\b", text, _re.I):
+            try:
+                await _handle_nl_quotation(text, chat_id, context)
+            except Exception as exc:
+                logger.exception("nl quotation error")
+                await send_text(bot, chat_id, f"❌ Error:\n<code>{exc}</code>")
+        else:
+            await _handle_quotation(text, chat_id, context)
+        return
+
+    if t.startswith("create ledger"):
+        print(f"[DIRECT] create ledger  text={text!r}", flush=True)
+        try:
+            await _handle_create_ledger(text, chat_id, bot)
+        except Exception as exc:
+            logger.exception("create ledger error")
+            await send_text(bot, chat_id, f"❌ Error:\n<code>{exc}</code>")
+        return
+
+    if t.startswith("statement"):
+        print(f"[DIRECT] statement  text={text!r}", flush=True)
+        try:
+            await _handle_statement(text, chat_id, bot)
+        except Exception as exc:
+            logger.exception("statement error")
+            await send_text(bot, chat_id, f"❌ Error:\n<code>{exc}</code>")
+        return
+
+    if t.split()[0] in ("ledger", "balance", "outstanding"):
+        print(f"[DIRECT] ledger/balance  text={text!r}", flush=True)
+        try:
+            await _handle_ledger(text, chat_id, bot)
+        except Exception as exc:
+            logger.exception("ledger error")
+            await send_text(bot, chat_id, f"❌ Error:\n<code>{exc}</code>")
+        return
+
+    if t.startswith("send "):
+        print(f"[DIRECT] send-doc  text={text!r}", flush=True)
+        try:
+            await _handle_send_doc(text, chat_id, bot)
+        except Exception as exc:
+            logger.exception("send doc error")
+            await send_text(bot, chat_id, f"❌ Error:\n<code>{exc}</code>")
+        return
+
+    if t in ("help", "/help", "/start"):
+        print(f"[DIRECT] help  text={text!r}", flush=True)
+        await send_text(bot, chat_id, _HELP)
+        return
+
+    # ── AI route — natural language only ──────────────────────────────────────
+    print(f"[AI] routing  text={text!r}", flush=True)
     session = _get_session(chat_id)
-
-    print("[AI] calling ai_router.route", flush=True)
-    action = _ai_router.route(text, session["history"], session)
-    print(f"[AI] action type={action.get('type')}  action={action}", flush=True)
+    action  = _ai_router.route(text, session["history"], session)
+    print(f"[AI] action type={action.get('type')}", flush=True)
     logger.info("AI action: %s", action)
 
     try:
