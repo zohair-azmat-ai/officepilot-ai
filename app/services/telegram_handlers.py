@@ -1006,6 +1006,16 @@ async def _handle_nl_quotation(
 
 # ── Invoice handler ───────────────────────────────────────────────────────────
 
+def _detect_company_key(raw: str) -> "str | None":
+    """Map raw company name to invoice template key, or None if not recognised."""
+    t = raw.lower()
+    if "quant" in t:
+        return "quant_gulf"
+    if "gulf" in t:
+        return "gulf_extrusions"
+    return None
+
+
 async def _handle_invoice(
     text: str,
     chat_id: int,
@@ -1027,6 +1037,16 @@ async def _handle_invoice(
 
     raw_company = hdr_m.group(1).strip().rstrip(",")
     company     = resolve_company_name(raw_company)
+
+    # Detect which company template to use
+    company_key = _detect_company_key(raw_company) or _detect_company_key(company)
+    if not company_key:
+        await send_text(bot, chat_id,
+            f"❌ No invoice template for <b>{company}</b>.\n\n"
+            "Invoice templates are available for:\n"
+            "• <b>Quant Gulf</b> — say <i>make invoice for quant gulf</i>\n"
+            "• <b>Gulf Extrusions</b> — say <i>make invoice for gulf extrusions</i>")
+        return
 
     # Parse LPO and DO numbers
     lpo_m = _LPO_RE.search(text)
@@ -1062,6 +1082,7 @@ async def _handle_invoice(
         company = best.company_name
 
     result = create_invoice(
+        company_key=company_key,
         client_name=company,
         items=items_dicts,
         lpo=lpo,

@@ -24,6 +24,22 @@ def _default_invoice_template_path() -> str:
     return str(Path(__file__).parent.parent / 'templates' / 'invoice_template.xlsx')
 
 
+def _default_quant_gulf_template() -> str:
+    base = os.environ.get('OFFICEPILOT_RESOURCE_DIR') or (
+        sys._MEIPASS if (getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'))
+        else str(Path(__file__).parent.parent)
+    )
+    return str(Path(base) / 'templates' / '02-03-2026 QUANT GULF LLC 8793.xlsx')
+
+
+def _default_gulf_extrusions_template() -> str:
+    base = os.environ.get('OFFICEPILOT_RESOURCE_DIR') or (
+        sys._MEIPASS if (getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'))
+        else str(Path(__file__).parent.parent)
+    )
+    return str(Path(base) / 'templates' / '15-04-2026 GULF EXTRUSIONS LLC 8834.xlsx')
+
+
 def _default_template_path() -> str:
     """
     Resolve the template path that works in all three execution contexts:
@@ -58,8 +74,12 @@ class Settings(BaseSettings):
     TEMPLATE_PATH: str = _default_template_path()
 
     # ── Invoice ────────────────────────────────────────────────────────────────
-    # Path to your invoice Excel template.
+    # Path to the generic invoice Excel template (fallback / legacy).
     INVOICE_TEMPLATE_PATH: str = _default_invoice_template_path()
+
+    # Company-specific invoice templates — resolved relative to templates/ folder.
+    QUANT_GULF_INVOICE_TEMPLATE_PATH:      str = _default_quant_gulf_template()
+    GULF_EXTRUSIONS_INVOICE_TEMPLATE_PATH: str = _default_gulf_extrusions_template()
 
     # Root folder for invoices — year/month sub-folders created automatically.
     INVOICE_BASE_PATH: str = r"G:\NEW DATA 2021\DRIVE\Invoice"

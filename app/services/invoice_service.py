@@ -2,7 +2,8 @@
 services/invoice_service.py — Invoice creation orchestrator.
 
 Handles:
-  • Invoice number generation (INV-YYYY-XXXX, sequential per month folder)
+  • Company-specific template selection (quant_gulf / gulf_extrusions)
+  • Invoice number generation — sequential plain integer, scanned from folder
   • Auto monthly folder rollover (always uses today's system date)
   • Excel template fill via invoice_writer
   • PDF export via pdf_export
@@ -15,28 +16,35 @@ from pathlib import Path
 
 from app.config import settings
 from app.services.file_naming import sanitize_client_name, sanitize_date
-from app.services.invoice_writer import InvoiceItem, InvoiceRequest, fill_invoice_template
+from app.services.invoice_writer import (
+    InvoiceItem, InvoiceRequest, fill_invoice_template, _LAYOUTS,
+)
 from app.services.pdf_export import export_to_pdf
 
 logger = logging.getLogger(__name__)
 
-# Matches "INV-2026-0105" in a filename — captures the sequence number
-_INV_SEQ_RE = re.compile(r"INV-\d{4}-(\d+)", re.IGNORECASE)
+# Matches a 4+-digit number at the end of a filename (before .xlsx/.pdf)
+_SEQ_RE = re.compile(r"(\d{4,})\.(?:xlsx|pdf)$", re.IGNORECASE)
 
 
-def _next_invoice_seq(folder: Path) -> int:
-    """Scan folder for highest existing INV-YYYY-XXXX sequence, return next."""
-    max_seq = 0
-    if folder.exists():
-        for entry in folder.iterdir():
-            if entry.is_file() and entry.suffix.lower() in {".xlsx", ".pdf"}:
-                m = _INV_SEQ_RE.search(entry.name)
-                if m:
-                    max_seq = max(max_seq, int(m.group(1)))
+def _next_invoice_seq(base_path: Path, seq_keyword: str, seq_floor: int) -> int:
+    """
+    Scan base_path recursively for invoice files belonging to this company,
+    return the next sequential number (max found, or seq_floor, whichever is higher, + 1).
+    """
+    max_seq = seq_floor
+    if base_path.exists():
+        for entry in base_path.rglob("*.xlsx"):
+            if seq_keyword.lower() not in entry.stem.lower():
+                continue
+            m = _SEQ_RE.search(entry.name)
+            if m:
+                max_seq = max(max_seq, int(m.group(1)))
     return max_seq + 1
 
 
 def create_invoice(
+    company_key: str,
     client_name: str,
     items: list[dict],   # each: {description, quantity, rate}
     lpo:   str = "",
@@ -45,16 +53,17 @@ def create_invoice(
     trn:   str = "",
 ) -> dict:
     """
-    Create a complete invoice: fill template → export PDF → return result dict.
+    Create a complete invoice for the given company: fill template → export PDF.
 
     Parameters
     ----------
-    client_name : str  — company/client name
-    items       : list — dicts with keys description, quantity, rate
-    lpo         : str  — LPO / purchase-order number (optional)
-    do_no       : str  — delivery-order number (optional)
-    attn        : str  — attention / contact name (optional)
-    trn         : str  — tax registration number (optional)
+    company_key  : str  — "quant_gulf" or "gulf_extrusions"
+    client_name  : str  — company/client name (for display in reply)
+    items        : list — dicts with keys description, quantity, rate
+    lpo          : str  — LPO / purchase-order number (optional)
+    do_no        : str  — delivery-order number (optional)
+    attn         : str  — attention / contact name (optional)
+    trn          : str  — tax registration number (optional)
 
     Returns
     -------
@@ -62,19 +71,27 @@ def create_invoice(
         invoice_no, client_name, excel_path, pdf_path, pdf_status,
         subtotal, tax, total, items_count, filename
     """
+    layout = _LAYOUTS.get(company_key)
+    if layout is None:
+        raise ValueError(
+            f"Unknown company_key: {company_key!r}. "
+            "Use 'quant_gulf' or 'gulf_extrusions'."
+        )
+
     today = _date.today()
     year  = today.year
     month = today.month
 
     # ── Folder — always derived from today's date ──────────────────────────────
-    folder = Path(settings.INVOICE_BASE_PATH) / str(year) / str(month).zfill(2)
+    base = Path(settings.INVOICE_BASE_PATH)
+    folder = base / str(year) / str(month).zfill(2)
     folder.mkdir(parents=True, exist_ok=True)
     logger.info("Invoice folder: %s", folder)
 
-    # ── Invoice number ─────────────────────────────────────────────────────────
-    seq        = _next_invoice_seq(folder)
-    invoice_no = f"INV-{year}-{seq:04d}"
-    logger.info("Invoice number: %s", invoice_no)
+    # ── Invoice number — scan full base path for this company ──────────────────
+    seq        = _next_invoice_seq(base, layout["seq_keyword"], layout["seq_floor"])
+    invoice_no = seq
+    logger.info("Invoice number: %d  (%s)", invoice_no, company_key)
 
     # ── Build items + totals ───────────────────────────────────────────────────
     inv_items = []
@@ -98,11 +115,10 @@ def create_invoice(
     date_str = today.strftime("%d-%m-%Y")
 
     request = InvoiceRequest(
+        company_key=company_key,
         client_name=client_name,
         date=date_str,
         invoice_no=invoice_no,
-        year=str(year),
-        month=str(month).zfill(2),
         lpo=lpo,
         do_no=do_no,
         attn=attn,
@@ -112,12 +128,11 @@ def create_invoice(
         total=total,
     )
 
-    # ── File paths ─────────────────────────────────────────────────────────────
-    safe_client = sanitize_client_name(client_name)
-    safe_date   = sanitize_date(date_str)
-    stem        = f"{safe_date} {invoice_no} {safe_client}"
-    excel_path  = folder / f"{stem}.xlsx"
-    pdf_path_expected = folder / f"{stem}.pdf"
+    # ── File paths — DATE DISPLAY_NAME SEQNO.xlsx ──────────────────────────────
+    display_name = layout["display_name"]
+    safe_date    = sanitize_date(date_str)
+    stem         = f"{safe_date} {display_name} {invoice_no}"
+    excel_path   = folder / f"{stem}.xlsx"
 
     # ── Write Excel ────────────────────────────────────────────────────────────
     fill_invoice_template(request, excel_path)
