@@ -257,6 +257,12 @@ def _safe_write(
 DESC_WRAP_CHARS = 60
 
 
+def _fmt_qty(qty: float) -> str:
+    """Format quantity for the Qty column: 1 → '1-NO', 2+ → 'N-NOS'."""
+    n = int(qty) if qty == int(qty) else qty
+    return f"{n}-NO" if qty == 1 else f"{n}-NOS"
+
+
 def _wrap_text(text: str, width: int) -> list[str]:
     """Word-wrap text into lines of at most width characters."""
     if len(text) <= width:
@@ -297,7 +303,7 @@ def _write_item_row(
     line_amount = round(quantity * rate, 2)
     _safe_write(cell_map, merge_map, "A", row, serial)
     _safe_write(cell_map, merge_map, "B", row, description)
-    _safe_write(cell_map, merge_map, "H", row, quantity)
+    _safe_write(cell_map, merge_map, "H", row, _fmt_qty(quantity))
     _safe_write(cell_map, merge_map, "J", row, rate)
     _safe_write(cell_map, merge_map, "L", row, line_amount)
     return line_amount
@@ -328,7 +334,7 @@ def _write_item_block(
     # First row — serial, first description line, qty, rate, amount
     _safe_write(cell_map, merge_map, "A", start_row, serial)
     _safe_write(cell_map, merge_map, "B", start_row, desc_lines[0])
-    _safe_write(cell_map, merge_map, "H", start_row, quantity)
+    _safe_write(cell_map, merge_map, "H", start_row, _fmt_qty(quantity))
     _safe_write(cell_map, merge_map, "J", start_row, rate)
     _safe_write(cell_map, merge_map, "L", start_row, line_amount)
 

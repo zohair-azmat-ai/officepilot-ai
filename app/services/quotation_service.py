@@ -13,6 +13,7 @@ The API route calls this function and returns its result directly.
 """
 
 import logging
+from datetime import date as _date
 from pathlib import Path
 
 from app.config import settings
@@ -39,11 +40,12 @@ def create_quotation(request: QuotationCreateRequest) -> QuotationCreateResponse
         exceptions are re-raised so the route layer can wrap them in HTTP errors.
     """
 
-    # ── 1. Resolve folder path ─────────────────────────────────────────────────
-    base = Path(settings.QUOTATION_BASE_PATH)
-    folder = base / request.year / request.month
+    # ── 1. Resolve folder path — always use today's date for auto-rollover ───────
+    today  = _date.today()
+    base   = Path(settings.QUOTATION_BASE_PATH)
+    folder = base / str(today.year) / str(today.month).zfill(2)
 
-    logger.info("Target folder: %s", folder)
+    logger.info("Target folder: %s  (system date: %s)", folder, today)
 
     # Create the folder if it doesn't exist yet (new month)
     folder.mkdir(parents=True, exist_ok=True)
