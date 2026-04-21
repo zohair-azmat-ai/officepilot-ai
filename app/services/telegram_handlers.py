@@ -1,16 +1,8 @@
 """
-services/telegram_handlers.py — Strict first-word message routing.
+services/telegram_handlers.py — AI-first message routing via OpenAI gpt-4o-mini.
 
-Routing table (first word wins; quotation is explicit, never a catch-all):
-  help / /start / /help           → _handle_help
-  create  + second-word=ledger    → _handle_create_ledger
-  add     + second-word=ledger    → _handle_add_debit
-  ledger | balance | outstanding  → _handle_ledger
-  payment received …              → _handle_payment
-  quote | quotation | qtn | qt    → _handle_quotation
-  anything else                   → unknown-command reply
-
-Ledger and quotation share NO code paths.
+All text messages → ai_router.route() → _dispatch_ai_action()
+OCR confirmation (yes/no/correct) is intercepted first and handled directly.
 """
 
 import os
@@ -29,6 +21,7 @@ from app.services.company_memory import lookup as company_lookup, resolve_compan
 from app.schemas.quotation import QuotationCreateRequest, QuotationItem
 from app.services.quotation_service import create_quotation
 from app.services.telegram_sender import send_text, send_document
+from app.services import ai_router as _ai_router   # module-level: fail fast if openai missing
 
 logger = logging.getLogger(__name__)
 
@@ -196,28 +189,20 @@ async def handle_message(
             return
         # Otherwise fall through to normal routing
 
-    print(f"[AI] incoming: {text!r}", flush=True)
+    print(f"[AI] incoming chat_id={chat_id} text={text!r}", flush=True)
     logger.info("MSG chat_id=%s  text=%.80r", chat_id, text)
 
-    # ── Route through AI assistant ────────────────────────────────────────────
-    try:
-        from app.services import ai_router as _ai_router
-    except Exception as imp_exc:
-        print(f"[AI] IMPORT ERROR: {imp_exc}", flush=True)
-        logger.exception("ai_router import failed")
-        await send_text(bot, chat_id, f"❌ AI router import failed:\n<code>{imp_exc}</code>")
-        return
-
+    # ── Route ALL messages through AI assistant ───────────────────────────────
     session = _get_session(chat_id)
 
-    print("[AI] calling ai_router.route ...", flush=True)
+    print("[AI] calling ai_router.route", flush=True)
     action = _ai_router.route(text, session["history"], session)
-    print(f"[AI] action={action}", flush=True)
+    print(f"[AI] action type={action.get('type')}  action={action}", flush=True)
     logger.info("AI action: %s", action)
 
     try:
         summary = await _dispatch_ai_action(action, text, chat_id, context, session)
-        print(f"[AI] dispatch done, summary={summary!r}", flush=True)
+        print(f"[AI] dispatch done summary={summary!r}", flush=True)
     except Exception as exc:
         logger.exception("Dispatch error for action=%s", action.get("type"))
         await send_text(bot, chat_id, f"❌ Error:\n<code>{exc}</code>")
