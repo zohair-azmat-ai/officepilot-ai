@@ -196,16 +196,28 @@ async def handle_message(
             return
         # Otherwise fall through to normal routing
 
+    print(f"[AI] incoming: {text!r}", flush=True)
     logger.info("MSG chat_id=%s  text=%.80r", chat_id, text)
 
     # ── Route through AI assistant ────────────────────────────────────────────
-    from app.services import ai_router as _ai_router
+    try:
+        from app.services import ai_router as _ai_router
+    except Exception as imp_exc:
+        print(f"[AI] IMPORT ERROR: {imp_exc}", flush=True)
+        logger.exception("ai_router import failed")
+        await send_text(bot, chat_id, f"❌ AI router import failed:\n<code>{imp_exc}</code>")
+        return
 
     session = _get_session(chat_id)
-    action  = _ai_router.route(text, session["history"], session)
+
+    print("[AI] calling ai_router.route ...", flush=True)
+    action = _ai_router.route(text, session["history"], session)
+    print(f"[AI] action={action}", flush=True)
+    logger.info("AI action: %s", action)
 
     try:
         summary = await _dispatch_ai_action(action, text, chat_id, context, session)
+        print(f"[AI] dispatch done, summary={summary!r}", flush=True)
     except Exception as exc:
         logger.exception("Dispatch error for action=%s", action.get("type"))
         await send_text(bot, chat_id, f"❌ Error:\n<code>{exc}</code>")
