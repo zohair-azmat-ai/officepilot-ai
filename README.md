@@ -8,6 +8,14 @@ app_port: 7860
 pinned: false
 ---
 
+## License Notice
+
+This project is public for portfolio/demo purposes only.
+Unauthorized use, copying, or redistribution is strictly prohibited.
+See [LICENSE](LICENSE) for full terms.
+
+---
+
 <div align="center">
 
 # 🏢 OfficePilot AI
@@ -23,7 +31,7 @@ pinned: false
 [![Desktop App](https://img.shields.io/badge/Desktop-Electron-47848F?style=for-the-badge&logo=electron&logoColor=white)](#-desktop-app)
 [![Windows First](https://img.shields.io/badge/Windows-First-0078D6?style=for-the-badge&logo=windows&logoColor=white)](#-windows-auto-start)
 [![Local First](https://img.shields.io/badge/Storage-Local--First-8E44AD?style=for-the-badge&logo=files&logoColor=white)](#-local-first-storage)
-[![License](https://img.shields.io/badge/License-MIT-2ECC71?style=for-the-badge)](LICENSE)
+[![License](https://img.shields.io/badge/License-All%20Rights%20Reserved-red?style=for-the-badge)](LICENSE)
 
 </div>
 
@@ -397,7 +405,8 @@ Pillow>=10.0.0
 
 ## 📄 License
 
-MIT — free to use, modify, and distribute.
+Copyright (c) Zohair Azmat. All rights reserved.
+This project is shared for portfolio/demo purposes only. Unauthorized use, copying, or redistribution is strictly prohibited. See [LICENSE](LICENSE) for full terms.
 
 ---
 

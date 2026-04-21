@@ -804,7 +804,7 @@ async def _handle_nl_quotation(
 # ── Document fetch ────────────────────────────────────────────────────────────
 
 async def _handle_send_doc(text: str, chat_id: int, bot) -> None:
-    from app.services.file_fetcher import search_docs, DOCS_FOLDER
+    from app.services.file_fetcher import search_docs
 
     parts = text.strip().split(None, 1)
     if len(parts) < 2 or not parts[1].strip():
@@ -813,12 +813,18 @@ async def _handle_send_doc(text: str, chat_id: int, bot) -> None:
             "Example: <pre>send trade license</pre>")
         return
 
-    query   = parts[1].strip()
-    matches = search_docs(query)
+    query             = parts[1].strip()
+    matches, all_files = search_docs(query)
 
     if not matches:
-        await send_text(bot, chat_id,
-            f"❌ No file found matching <b>{query}</b> in the documents folder.")
+        if all_files:
+            available = "\n".join(f"• {f.name}" for f in sorted(all_files, key=lambda x: x.name))
+            await send_text(bot, chat_id,
+                f"❌ No file found matching <b>{query}</b>.\n\n"
+                f"📂 Available documents:\n{available}")
+        else:
+            await send_text(bot, chat_id,
+                "❌ Documents folder is empty or not accessible.")
         return
 
     if len(matches) == 1:
