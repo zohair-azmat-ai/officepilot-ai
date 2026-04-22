@@ -81,8 +81,13 @@ class Settings(BaseSettings):
     QUANT_GULF_INVOICE_TEMPLATE_PATH:      str = _default_quant_gulf_template()
     GULF_EXTRUSIONS_INVOICE_TEMPLATE_PATH: str = _default_gulf_extrusions_template()
 
-    # Root folder for invoices — year/month sub-folders created automatically.
+    # Generic invoice base path (legacy / fallback — not used by company-specific routes).
     INVOICE_BASE_PATH: str = r"G:\NEW DATA 2021\DRIVE\Invoice"
+
+    # Company-specific invoice save roots.
+    # Final save path: <root>\YYYY\MM\  (created automatically at runtime)
+    QUANT_GULF_INVOICE_BASE_PATH:      str = r"G:\NEW DATA 2021\DRIVE\QUANT GULF\invoices"
+    GULF_EXTRUSIONS_INVOICE_BASE_PATH: str = r"G:\NEW DATA 2021\DRIVE\gulf do and invoices"
 
     # ── Ledger ─────────────────────────────────────────────────────────────────
     # Root folder for per-company ledger Excel files.

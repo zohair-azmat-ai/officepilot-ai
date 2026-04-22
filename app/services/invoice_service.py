@@ -78,15 +78,25 @@ def create_invoice(
             "Use 'quant_gulf' or 'gulf_extrusions'."
         )
 
+    # ── Company-specific base path ─────────────────────────────────────────────
+    _BASE_MAP = {
+        "quant_gulf":      settings.QUANT_GULF_INVOICE_BASE_PATH,
+        "gulf_extrusions": settings.GULF_EXTRUSIONS_INVOICE_BASE_PATH,
+    }
+    base = Path(_BASE_MAP[company_key])
+    print(f"[INVOICE] company={company_key!r}  base={base}", flush=True)
+    logger.info("Invoice base path: %s  (company=%s)", base, company_key)
+
     today = _date.today()
     year  = today.year
     month = today.month
 
-    # ── Folder — always derived from today's date ──────────────────────────────
-    base = Path(settings.INVOICE_BASE_PATH)
+    # ── Folder — always derived from today's date; created if absent ───────────
     folder = base / str(year) / str(month).zfill(2)
+    created = not folder.exists()
     folder.mkdir(parents=True, exist_ok=True)
-    logger.info("Invoice folder: %s", folder)
+    print(f"[INVOICE] folder={folder}  created={created}", flush=True)
+    logger.info("Invoice folder: %s  (new=%s)", folder, created)
 
     # ── Invoice number — scan full base path for this company ──────────────────
     seq        = _next_invoice_seq(base, layout["seq_keyword"], layout["seq_floor"])
@@ -136,10 +146,12 @@ def create_invoice(
 
     # ── Write Excel ────────────────────────────────────────────────────────────
     fill_invoice_template(request, excel_path)
+    print(f"[INVOICE] Excel saved: {excel_path}", flush=True)
     logger.info("Invoice Excel written: %s", excel_path)
 
     # ── Export PDF ─────────────────────────────────────────────────────────────
     pdf_result = export_to_pdf(excel_path)
+    print(f"[INVOICE] PDF status={pdf_result['status']}  path={pdf_result['pdf_path']}", flush=True)
     logger.info("Invoice PDF: %s — %s", pdf_result["status"], pdf_result["message"])
 
     return {
