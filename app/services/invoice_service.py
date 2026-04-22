@@ -47,10 +47,11 @@ def create_invoice(
     company_key: str,
     client_name: str,
     items: list[dict],   # each: {description, quantity, rate}
-    lpo:   str = "",
-    do_no: str = "",
-    attn:  str = "",
-    trn:   str = "",
+    lpo:               str = "",
+    do_no:             str = "",
+    attn:              str = "",
+    trn:               str = "",
+    forced_invoice_no: "int | None" = None,
 ) -> dict:
     """
     Create a complete invoice for the given company: fill template → export PDF.
@@ -98,10 +99,15 @@ def create_invoice(
     print(f"[INVOICE] folder={folder}  created={created}", flush=True)
     logger.info("Invoice folder: %s  (new=%s)", folder, created)
 
-    # ── Invoice number — scan full base path for this company ──────────────────
-    seq        = _next_invoice_seq(base, layout["seq_keyword"], layout["seq_floor"])
-    invoice_no = seq
-    logger.info("Invoice number: %d  (%s)", invoice_no, company_key)
+    # ── Invoice number — manual override takes priority over auto-increment ───
+    if forced_invoice_no is not None:
+        invoice_no = forced_invoice_no
+        print(f"[INVOICE] invoice_no={invoice_no} (manual override)", flush=True)
+        logger.info("Invoice number: %d  (manual override)", invoice_no)
+    else:
+        invoice_no = _next_invoice_seq(base, layout["seq_keyword"], layout["seq_floor"])
+        print(f"[INVOICE] invoice_no={invoice_no} (auto)", flush=True)
+        logger.info("Invoice number: %d  (auto, company=%s)", invoice_no, company_key)
 
     # ── Build items + totals ───────────────────────────────────────────────────
     inv_items = []

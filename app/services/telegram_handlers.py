@@ -105,6 +105,12 @@ _INV_HDR_RE = _re.compile(
 # DO number: "do 09922" on its own line or inline
 _DO_RE = _re.compile(r"(?:^|\s)do\s+([^\s\n]+)", _re.I | _re.M)
 
+# Manual invoice number override: "invoice 8841" or "force invoice number 8841"
+_FORCE_INV_RE = _re.compile(
+    r"(?:force\s+invoice\s+(?:number\s+)?|(?<!\w)invoice\s+)(\d{4,})",
+    _re.I,
+)
+
 # OCR correction: "correct invoice 1234"  /  "correct company gulf"
 _CORRECT_RE = _re.compile(
     r"correct\s+(?P<field>invoice|date|amount|lpo|company)\s+(?P<value>.+)",
@@ -1048,11 +1054,15 @@ async def _handle_invoice(
             "• <b>Gulf Extrusions</b> — say <i>make invoice for gulf extrusions</i>")
         return
 
-    # Parse LPO and DO numbers
-    lpo_m = _LPO_RE.search(text)
-    do_m  = _DO_RE.search(text)
-    lpo   = lpo_m.group("lpo").strip() if lpo_m else ""
-    do_no = do_m.group(1).strip()      if do_m  else ""
+    # Parse LPO, DO, and optional manual invoice number override
+    lpo_m      = _LPO_RE.search(text)
+    do_m       = _DO_RE.search(text)
+    force_inv_m = _FORCE_INV_RE.search(text)
+    lpo            = lpo_m.group("lpo").strip()  if lpo_m       else ""
+    do_no          = do_m.group(1).strip()        if do_m        else ""
+    forced_inv_no  = int(force_inv_m.group(1))   if force_inv_m else None
+    if forced_inv_no:
+        print(f"[INVOICE] manual override invoice_no={forced_inv_no}", flush=True)
 
     # Parse items — reuse the same NL item parser as quotation
     # Swap "invoice" → "quotation" so _parse_nl_quotation's header regex matches
@@ -1089,6 +1099,7 @@ async def _handle_invoice(
         do_no=do_no,
         attn=attn,
         trn=trn,
+        forced_invoice_no=forced_inv_no,
     )
 
     # Build reply
