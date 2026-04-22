@@ -219,6 +219,35 @@ def _set_row_height(row_map: dict, row_num: int, height: float) -> None:
         row_el.set("customHeight", "1")
 
 
+# xf style indices in the quotation template that are used ONLY by description
+# (column B) cells in item rows 20-35 and are missing wrapText.  Confirmed safe
+# to patch: they appear in no other rows.
+_DESC_NO_WRAP_XF = frozenset({58, 63, 69, 70})
+
+
+def _patch_description_styles(styles_bytes: bytes) -> bytes:
+    """
+    Return a modified xl/styles.xml that adds wrapText='1' to the xf entries
+    used by description cells in item rows that were created without it.
+    Without this patch LibreOffice PDF export renders the text flowing into
+    subsequent rows instead of being contained within the item row.
+    """
+    _register_namespaces()
+    root = ET.fromstring(styles_bytes.decode("utf-8"))
+    xfs_el = root.find(f"{{{_NS_MAIN}}}cellXfs")
+    if xfs_el is None:
+        return styles_bytes
+    for i, xf in enumerate(xfs_el):
+        if i not in _DESC_NO_WRAP_XF:
+            continue
+        align = xf.find(f"{{{_NS_MAIN}}}alignment")
+        if align is None:
+            align = ET.SubElement(xf, f"{{{_NS_MAIN}}}alignment")
+        align.set("wrapText", "1")
+    xml_decl = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\r\n'
+    return (xml_decl + ET.tostring(root, encoding="unicode")).encode("utf-8")
+
+
 # ── Cell value setters ────────────────────────────────────────────────────────
 
 def _set_text(cell_el: ET.Element, value: str) -> None:
@@ -279,9 +308,10 @@ def _safe_write(
 
 # ── Item row helpers ──────────────────────────────────────────────────────────
 
-# Max characters that fit in the description area (merged B:G).
-# Adjust if your template columns are wider or narrower.
-DESC_WRAP_CHARS = 60
+# Max characters per line in the description area (merged B:G, ~73.7 col-units).
+# Conservative value: actual LibreOffice render width ≈ 64 chars for Calibri 11pt,
+# but we use 55 so the height is always slightly over-estimated (safe).
+DESC_WRAP_CHARS = 55
 
 
 def _fmt_qty(qty: float) -> str:
@@ -458,6 +488,11 @@ def fill_template(
     with zipfile.ZipFile(template_path, "r") as zin:
         entries: dict[str, bytes] = {name: zin.read(name) for name in zin.namelist()}
         info_map: dict[str, zipfile.ZipInfo] = {zi.filename: zi for zi in zin.infolist()}
+
+    # Patch description cells in styles.xml to ensure wrapText is enabled.
+    # Without this, LibreOffice renders long descriptions flowing into the next row.
+    if "xl/styles.xml" in entries:
+        entries["xl/styles.xml"] = _patch_description_styles(entries["xl/styles.xml"])
 
     # ── 3. Parse the sheet XML ────────────────────────────────────────────────
     root = ET.fromstring(entries[_SHEET_ENTRY].decode("utf-8"))
