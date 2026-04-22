@@ -90,7 +90,6 @@ _QUANT_GULF_LAYOUT = {
     "total_cell":      ("J", 39),
     "words_cell":      ("B", 39),
     "per_line_tax":    False,
-    "desc_wrap_chars": 25,
 }
 
 _GULF_EXTRUSIONS_LAYOUT = {
@@ -121,13 +120,57 @@ _GULF_EXTRUSIONS_LAYOUT = {
     "total_cell":      ("M", 42),
     "words_cell":      ("B", 42),
     "per_line_tax":    True,
-    "desc_wrap_chars": 25,
 }
 
 _LAYOUTS: dict[str, dict] = {
     "quant_gulf":      _QUANT_GULF_LAYOUT,
     "gulf_extrusions": _GULF_EXTRUSIONS_LAYOUT,
 }
+
+
+# ── Description width calculator ─────────────────────────────────────────────
+
+_EXCEL_DEFAULT_COL_WIDTH = 8.43   # Excel default when no <col> element present
+_EXCEL_UNIT_TO_CHARS     = 0.9    # conservative: 1 Excel char-unit ≈ 0.9 printable chars
+
+
+def _desc_wrap_chars_from_root(
+    root,
+    desc_col: str,
+    qty_col: str,
+    fallback: int = 40,
+) -> int:
+    """
+    Return how many characters fit across the description merge range by reading
+    the actual column widths from the sheet's <cols> element.
+
+    Covers columns [desc_col, qty_col) — i.e. from desc_col up to but not
+    including qty_col (which is where the numeric columns start).
+
+    Excel's column-width unit is defined as the width of the widest digit in the
+    Normal style font, so 1 unit ≈ 1 printable character for Calibri 11pt.
+    We apply a 0.9 safety factor so the estimate is slightly conservative.
+    """
+    from app.services.excel_writer import _col_letter_to_num  # local to avoid circular
+    desc_n = _col_letter_to_num(desc_col)
+    qty_n  = _col_letter_to_num(qty_col)
+
+    col_widths: dict[int, float] = {}
+    cols_el = root.find(f"{{{_NS_MAIN}}}cols")
+    if cols_el is not None:
+        for col_el in cols_el.findall(f"{{{_NS_MAIN}}}col"):
+            mn = int(col_el.attrib.get("min", 0))
+            mx = int(col_el.attrib.get("max", 0))
+            w  = float(col_el.attrib.get("width", _EXCEL_DEFAULT_COL_WIDTH))
+            for c in range(mn, mx + 1):
+                col_widths[c] = w
+
+    total_units = sum(
+        col_widths.get(c, _EXCEL_DEFAULT_COL_WIDTH)
+        for c in range(desc_n, qty_n)
+    )
+    result = int(total_units * _EXCEL_UNIT_TO_CHARS)
+    return max(result, fallback)
 
 
 # ── Invoice description-style patcher ────────────────────────────────────────
@@ -197,9 +240,9 @@ def _write_item_block_simple(
     cell_map, merge_map, row_map, layout: dict,
     item_rows: list, row_idx: int,
     serial: int, description: str, quantity: float, rate: float,
+    wrap_chars: int = DESC_WRAP_CHARS,
 ) -> tuple[float, int]:
     """Quant Gulf item writer (no per-line tax). Returns (amount, rows_used)."""
-    wrap_chars  = layout.get("desc_wrap_chars", DESC_WRAP_CHARS)
     desc_lines  = _wrap_text(description, wrap_chars)
     rows_avail  = len(item_rows) - row_idx
     rows_to_use = min(len(desc_lines), rows_avail)
@@ -229,9 +272,9 @@ def _write_item_block_tax(
     cell_map, merge_map, row_map, layout: dict,
     item_rows: list, row_idx: int,
     serial: int, description: str, quantity: float, rate: float,
+    wrap_chars: int = DESC_WRAP_CHARS,
 ) -> tuple[float, int]:
     """Gulf Extrusions item writer (per-line VAT). Returns (amount_excl, rows_used)."""
-    wrap_chars  = layout.get("desc_wrap_chars", DESC_WRAP_CHARS)
     desc_lines  = _wrap_text(description, wrap_chars)
     rows_avail  = len(item_rows) - row_idx
     rows_to_use = min(len(desc_lines), rows_avail)
@@ -331,6 +374,11 @@ def fill_invoice_template(request: InvoiceRequest, output_path: Path) -> Path:
         trn_col, trn_row = layout["trn_cell"]
         _safe_write(cell_map, merge_map, trn_col, trn_row, request.trn.strip())
 
+    # ── Description wrap width — computed from actual template column widths ──────
+    wrap_chars = _desc_wrap_chars_from_root(root, layout["desc_col"], layout["qty_col"])
+    logger.debug("Invoice desc wrap_chars=%d  (desc_col=%s  qty_col=%s)",
+                 wrap_chars, layout["desc_col"], layout["qty_col"])
+
     # ── Item rows ──────────────────────────────────────────────────────────────
     subtotal    = 0.0
     item_rows   = layout["item_rows"]
@@ -350,6 +398,7 @@ def fill_invoice_template(request: InvoiceRequest, output_path: Path) -> Path:
             description=item.description.upper(),
             quantity=item.quantity,
             rate=item.rate,
+            wrap_chars=wrap_chars,
         )
         subtotal += amount
         row_idx  += rows_used
