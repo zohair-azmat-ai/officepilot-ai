@@ -81,7 +81,7 @@ def create_invoice(
     # ── Company-specific base path ─────────────────────────────────────────────
     _BASE_MAP = {
         "quant_gulf":      settings.QUANT_GULF_INVOICE_BASE_PATH,
-        "gulf_extrusions": settings.GULF_EXTRUSIONS_INVOICE_BASE_PATH,
+        "gulf_extrusions": settings.GULF_INVOICE_BASE_PATH,
     }
     base = Path(_BASE_MAP[company_key])
     print(f"[INVOICE] company={company_key!r}  base={base}", flush=True)

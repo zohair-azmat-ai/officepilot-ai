@@ -86,8 +86,8 @@ class Settings(BaseSettings):
 
     # Company-specific invoice save roots.
     # Final save path: <root>\YYYY\MM\  (created automatically at runtime)
-    QUANT_GULF_INVOICE_BASE_PATH:      str = r"G:\NEW DATA 2021\DRIVE\QUANT GULF\invoices"
-    GULF_EXTRUSIONS_INVOICE_BASE_PATH: str = r"G:\NEW DATA 2021\DRIVE\gulf do and invoices"
+    QUANT_GULF_INVOICE_BASE_PATH: str = r"G:\NEW DATA 2021\DRIVE\QUANT GULF\invoices"
+    GULF_INVOICE_BASE_PATH:       str = r"G:\NEW DATA 2021\DRIVE\gulf do and invoices"
 
     # ── Ledger ─────────────────────────────────────────────────────────────────
     # Root folder for per-company ledger Excel files.
