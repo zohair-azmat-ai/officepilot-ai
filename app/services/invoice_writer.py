@@ -19,6 +19,7 @@ from pathlib import Path
 
 from app.config import settings
 from app.services.excel_writer import (
+    _NS_MAIN,
     _build_merge_map, _build_cell_map, _build_row_map,
     _safe_write, _set_row_height,
     _fmt_qty, _wrap_text, _amount_in_words,
@@ -75,6 +76,7 @@ _QUANT_GULF_LAYOUT = {
     "do_cell":         ("E", 18),
     "do_prefix":       "                         D.O NO  :-       ",
     "lpo_cell":        ("J", 19),
+    "trn_cell":        ("C", 19),
     "item_rows":       [23] + list(range(24, 36)),  # 13 slots (rows 23-35)
     "item_row_max":    35,
     "clear_cols":      ["A", "B", "E", "F", "J"],
@@ -88,6 +90,7 @@ _QUANT_GULF_LAYOUT = {
     "total_cell":      ("J", 39),
     "words_cell":      ("B", 39),
     "per_line_tax":    False,
+    "desc_wrap_chars": 25,
 }
 
 _GULF_EXTRUSIONS_LAYOUT = {
@@ -101,6 +104,7 @@ _GULF_EXTRUSIONS_LAYOUT = {
     "do_cell":         ("I", 17),
     "do_prefix":       "DO :-                  ",
     "lpo_cell":        ("M", 18),
+    "trn_cell":        ("C", 18),
     "item_rows":       list(range(22, 39)),  # 17 slots (rows 22-38)
     "item_row_max":    38,
     "clear_cols":      ["A", "B", "E", "F", "G", "H", "I", "M"],
@@ -117,6 +121,7 @@ _GULF_EXTRUSIONS_LAYOUT = {
     "total_cell":      ("M", 42),
     "words_cell":      ("B", 42),
     "per_line_tax":    True,
+    "desc_wrap_chars": 25,
 }
 
 _LAYOUTS: dict[str, dict] = {
@@ -125,41 +130,136 @@ _LAYOUTS: dict[str, dict] = {
 }
 
 
-# ── Item-row writers ──────────────────────────────────────────────────────────
+# ── Invoice description-style patcher ────────────────────────────────────────
 
-def _write_item_simple(cell_map, merge_map, row_map, layout: dict,
-                       row: int, serial: int,
-                       description: str, quantity: float, rate: float) -> float:
-    """Write one item row for Quant Gulf (no per-line tax). Returns line amount."""
+def _patch_invoice_desc_styles(
+    styles_bytes: bytes,
+    sheet_bytes: bytes,
+    item_row_start: int,
+    item_row_max: int,
+) -> bytes:
+    """
+    Scan column-B cells in item rows, collect their xf style indices, and add
+    wrapText='1' to any that lack it.  Without this patch LibreOffice PDF export
+    renders long descriptions flowing into subsequent rows.
+    """
+    _register_namespaces()
+
+    # Collect xf indices used by column-B cells in item rows
+    sheet_root = ET.fromstring(sheet_bytes.decode("utf-8"))
+    desc_xf: set[int] = set()
+    sheet_data = sheet_root.find(f"{{{_NS_MAIN}}}sheetData")
+    if sheet_data is not None:
+        for row_el in sheet_data.findall(f"{{{_NS_MAIN}}}row"):
+            rnum = int(row_el.attrib.get("r", 0))
+            if not (item_row_start <= rnum <= item_row_max):
+                continue
+            for cell_el in row_el.findall(f"{{{_NS_MAIN}}}c"):
+                ref = cell_el.attrib.get("r", "")
+                m = re.match(r"([A-Z]+)(\d+)", ref)
+                if not m or m.group(1) != "B":
+                    continue
+                s_attr = cell_el.attrib.get("s")
+                if s_attr is not None:
+                    desc_xf.add(int(s_attr))
+
+    if not desc_xf:
+        return styles_bytes
+
+    styles_root = ET.fromstring(styles_bytes.decode("utf-8"))
+    xfs_el = styles_root.find(f"{{{_NS_MAIN}}}cellXfs")
+    if xfs_el is None:
+        return styles_bytes
+
+    for i, xf in enumerate(xfs_el):
+        if i not in desc_xf:
+            continue
+        align = xf.find(f"{{{_NS_MAIN}}}alignment")
+        if align is None:
+            align = ET.SubElement(xf, f"{{{_NS_MAIN}}}alignment")
+        if align.get("wrapText") != "1":
+            align.set("wrapText", "1")
+            xf.set("applyAlignment", "1")
+
+    xml_decl = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\r\n'
+    return (xml_decl + ET.tostring(styles_root, encoding="unicode")).encode("utf-8")
+
+
+# ── Item-row block writers ────────────────────────────────────────────────────
+#
+# Each function writes one invoice item across one or more consecutive rows:
+#   row 0  : serial | first description line | qty | rate | amount (+ tax cols)
+#   row 1+ : description continuation only   | all numeric cols blank
+#
+# Returns (line_amount, rows_consumed) so the caller can advance its row pointer.
+
+def _write_item_block_simple(
+    cell_map, merge_map, row_map, layout: dict,
+    item_rows: list, row_idx: int,
+    serial: int, description: str, quantity: float, rate: float,
+) -> tuple[float, int]:
+    """Quant Gulf item writer (no per-line tax). Returns (amount, rows_used)."""
+    wrap_chars  = layout.get("desc_wrap_chars", DESC_WRAP_CHARS)
+    desc_lines  = _wrap_text(description, wrap_chars)
+    rows_avail  = len(item_rows) - row_idx
+    rows_to_use = min(len(desc_lines), rows_avail)
+
     amount = round(quantity * rate, 2)
-    _safe_write(cell_map, merge_map, layout["serial_col"],  row, serial)
-    _safe_write(cell_map, merge_map, layout["desc_col"],    row, description)
-    _safe_write(cell_map, merge_map, layout["qty_col"],     row, _fmt_qty(quantity))
-    _safe_write(cell_map, merge_map, layout["rate_col"],    row, rate)
-    _safe_write(cell_map, merge_map, layout["amount_col"],  row, amount)
-    wrapped = max(1, len(_wrap_text(description, DESC_WRAP_CHARS)))
-    _set_row_height(row_map, row, round(wrapped * _ROW_HEIGHT_PER_LINE, 2))
-    return amount
+
+    row = item_rows[row_idx]
+    _safe_write(cell_map, merge_map, layout["serial_col"], row, serial)
+    _safe_write(cell_map, merge_map, layout["desc_col"],   row, desc_lines[0])
+    _safe_write(cell_map, merge_map, layout["qty_col"],    row, _fmt_qty(quantity))
+    _safe_write(cell_map, merge_map, layout["rate_col"],   row, rate)
+    _safe_write(cell_map, merge_map, layout["amount_col"], row, amount)
+    _set_row_height(row_map, row, _ROW_HEIGHT_PER_LINE)
+
+    for i, line in enumerate(desc_lines[1:rows_to_use], 1):
+        cont_row = item_rows[row_idx + i]
+        _safe_write(cell_map, merge_map, layout["desc_col"], cont_row, line)
+        _set_row_height(row_map, cont_row, _ROW_HEIGHT_PER_LINE)
+
+    if rows_to_use < len(desc_lines):
+        logger.warning("Item %d description truncated: no item rows left.", serial)
+
+    return amount, rows_to_use
 
 
-def _write_item_tax(cell_map, merge_map, row_map, layout: dict,
-                    row: int, serial: int,
-                    description: str, quantity: float, rate: float) -> float:
-    """Write one item row for Gulf Extrusions (per-line VAT). Returns excl-VAT amount."""
+def _write_item_block_tax(
+    cell_map, merge_map, row_map, layout: dict,
+    item_rows: list, row_idx: int,
+    serial: int, description: str, quantity: float, rate: float,
+) -> tuple[float, int]:
+    """Gulf Extrusions item writer (per-line VAT). Returns (amount_excl, rows_used)."""
+    wrap_chars  = layout.get("desc_wrap_chars", DESC_WRAP_CHARS)
+    desc_lines  = _wrap_text(description, wrap_chars)
+    rows_avail  = len(item_rows) - row_idx
+    rows_to_use = min(len(desc_lines), rows_avail)
+
     amount_excl = round(quantity * rate, 2)
     tax_amt     = round(amount_excl * 0.05, 2)
     total_line  = round(amount_excl + tax_amt, 2)
+
+    row = item_rows[row_idx]
     _safe_write(cell_map, merge_map, layout["serial_col"],   row, serial)
-    _safe_write(cell_map, merge_map, layout["desc_col"],     row, description)
+    _safe_write(cell_map, merge_map, layout["desc_col"],     row, desc_lines[0])
     _safe_write(cell_map, merge_map, layout["qty_col"],      row, _fmt_qty(quantity))
     _safe_write(cell_map, merge_map, layout["rate_col"],     row, rate)
     _safe_write(cell_map, merge_map, layout["amount_col"],   row, amount_excl)
-    _safe_write(cell_map, merge_map, layout["tax_rate_col"], row, 0.05)
+    _safe_write(cell_map, merge_map, layout["tax_rate_col"], row, "5%")
     _safe_write(cell_map, merge_map, layout["tax_amt_col"],  row, tax_amt)
     _safe_write(cell_map, merge_map, layout["total_col"],    row, total_line)
-    wrapped = max(1, len(_wrap_text(description, DESC_WRAP_CHARS)))
-    _set_row_height(row_map, row, round(wrapped * _ROW_HEIGHT_PER_LINE, 2))
-    return amount_excl
+    _set_row_height(row_map, row, _ROW_HEIGHT_PER_LINE)
+
+    for i, line in enumerate(desc_lines[1:rows_to_use], 1):
+        cont_row = item_rows[row_idx + i]
+        _safe_write(cell_map, merge_map, layout["desc_col"], cont_row, line)
+        _set_row_height(row_map, cont_row, _ROW_HEIGHT_PER_LINE)
+
+    if rows_to_use < len(desc_lines):
+        logger.warning("Item %d description truncated: no item rows left.", serial)
+
+    return amount_excl, rows_to_use
 
 
 # ── Main writer ───────────────────────────────────────────────────────────────
@@ -226,25 +326,33 @@ def fill_invoice_template(request: InvoiceRequest, output_path: Path) -> Path:
     else:
         _safe_write(cell_map, merge_map, lpo_col, lpo_row, None)
 
+    # ── TRN ───────────────────────────────────────────────────────────────────
+    if request.trn and request.trn.strip() and "trn_cell" in layout:
+        trn_col, trn_row = layout["trn_cell"]
+        _safe_write(cell_map, merge_map, trn_col, trn_row, request.trn.strip())
+
     # ── Item rows ──────────────────────────────────────────────────────────────
-    subtotal   = 0.0
-    item_rows  = layout["item_rows"]
-    write_item = _write_item_tax if layout["per_line_tax"] else _write_item_simple
+    subtotal    = 0.0
+    item_rows   = layout["item_rows"]
+    write_block = _write_item_block_tax if layout["per_line_tax"] else _write_item_block_simple
+    row_idx     = 0
 
     for i, item in enumerate(request.items):
-        if i >= len(item_rows):
+        if row_idx >= len(item_rows):
             logger.warning("No more invoice item rows after item %d — dropped.", i)
             break
-        row = item_rows[i]
-        logger.debug("Invoice item %d → row %d  desc=%r  qty=%s  rate=%s",
-                     i + 1, row, item.description, item.quantity, item.rate)
-        subtotal += write_item(
-            cell_map, merge_map, row_map, layout, row,
+        logger.debug("Invoice item %d → row_idx=%d  desc=%r  qty=%s  rate=%s",
+                     i + 1, row_idx, item.description, item.quantity, item.rate)
+        amount, rows_used = write_block(
+            cell_map, merge_map, row_map, layout,
+            item_rows, row_idx,
             serial=i + 1,
             description=item.description.upper(),
             quantity=item.quantity,
             rate=item.rate,
         )
+        subtotal += amount
+        row_idx  += rows_used
 
     subtotal = round(subtotal, 2)
     tax      = round(subtotal * 0.05, 2)
