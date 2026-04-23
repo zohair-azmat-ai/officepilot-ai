@@ -83,6 +83,16 @@ _PAY_RE = _re.compile(
     _re.I,
 )
 
+# ledger multi payment COMPANY invoices N,N,N split A,A,A [date DD-MM-YYYY]
+# ledger multi payment COMPANY invoices N,N,N total A equally [date DD-MM-YYYY]
+_MULTI_PAY_RE = _re.compile(
+    r"ledger\s+multi\s+payment\s+(?P<company>.+?)\s+"
+    r"invoices?\s+(?P<invoices>[\d]+(?:\s*,\s*[\d]+)*)\s+"
+    r"(?:split\s+(?P<split>[\d,. ]+?)|total\s+(?P<total>[\d,]+(?:\.\d{1,2})?)\s+equally)"
+    r"(?:\s+date\s+[\d\-/]+)?",
+    _re.I,
+)
+
 # add ledger COMPANY invoice NUMBER debit|credit AMOUNT [lpo X] [date DD-MM-YYYY]
 _ADD_LEDGER_RE = _re.compile(
     r"add\s+ledger\s+(?P<company>.+?)\s+"
@@ -316,6 +326,15 @@ async def handle_message(
             await _handle_payment(text, chat_id, bot)
         except Exception as exc:
             logger.exception("payment error")
+            await send_text(bot, chat_id, f"❌ Error:\n<code>{exc}</code>")
+        return
+
+    if t.startswith("ledger multi payment"):
+        print(f"[DIRECT] ledger multi payment  text={text!r}", flush=True)
+        try:
+            await _handle_multi_payment(text, chat_id, bot)
+        except Exception as exc:
+            logger.exception("ledger multi payment error")
             await send_text(bot, chat_id, f"❌ Error:\n<code>{exc}</code>")
         return
 
@@ -624,6 +643,61 @@ async def _handle_add_debit(text: str, chat_id: int, bot) -> None:
         if lpo_no:
             reply += f"\nLPO:     <code>{lpo_no}</code>"
     await send_text(bot, chat_id, reply)
+
+
+# ── Multi-invoice payment handler ─────────────────────────────────────────────
+
+async def _handle_multi_payment(text: str, chat_id: int, bot) -> None:
+    from app.services.ledger_excel import add_multi_credit_rows, ledger_exists
+
+    m = _MULTI_PAY_RE.search(text)
+    if not m:
+        await send_text(bot, chat_id,
+            "❌ Format:\n"
+            "<pre>ledger multi payment COMPANY invoices 1,2,3 split 500,500,500 date DD-MM-YYYY\n"
+            "ledger multi payment COMPANY invoices 1,2,3 total 1500 equally date DD-MM-YYYY</pre>")
+        return
+
+    raw     = m.group("company").strip()
+    company = resolve_company_name(raw)
+
+    if not ledger_exists(company):
+        await send_text(bot, chat_id,
+            f"❌ No ledger found for <b>{company}</b>.\n"
+            f"Create it first:\n<pre>create ledger for {raw}</pre>")
+        return
+
+    invoices = [inv.strip() for inv in m.group("invoices").split(",") if inv.strip()]
+
+    if m.group("split"):
+        amounts_raw = [a.strip() for a in _re.split(r"[,\s]+", m.group("split").strip()) if a.strip()]
+        if len(amounts_raw) != len(invoices):
+            await send_text(bot, chat_id,
+                f"❌ Split count ({len(amounts_raw)}) does not match "
+                f"invoice count ({len(invoices)}).\n"
+                f"Provide exactly one amount per invoice.")
+            return
+        amounts = [round(float(a.replace(",", "")), 2) for a in amounts_raw]
+    else:
+        total = round(float(m.group("total").replace(",", "")), 2)
+        n     = len(invoices)
+        base  = round(total / n, 2)
+        amounts = [base] * n
+        amounts[-1] = round(total - sum(amounts[:-1]), 2)
+
+    entry_date = _extract_date(text)
+    written = add_multi_credit_rows(company, invoices, amounts, date_str=entry_date)
+
+    lines = [
+        f"✅ <b>Multi-payment added</b>",
+        f"Company: <b>{company}</b>",
+        f"Date:    <code>{entry_date}</code>",
+        "",
+    ]
+    for inv, amt in written:
+        lines.append(f"Invoice <code>{inv}</code>  →  <b>AED {amt:,.2f}</b>")
+    lines.append(f"\nTotal credited: <b>AED {sum(a for _, a in written):,.2f}</b>")
+    await send_text(bot, chat_id, "\n".join(lines))
 
 
 # ── Payment (credit) handler ──────────────────────────────────────────────────

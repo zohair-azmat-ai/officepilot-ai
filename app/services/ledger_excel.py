@@ -183,6 +183,34 @@ def add_credit_row(company_name: str, invoice_no: str, amount: float,
     logger.info("Credit row added: %s / %s / %.2f  date=%s", company_name, invoice_no, amount, entry_date)
 
 
+def add_multi_credit_rows(
+    company_name: str,
+    invoices: list,
+    amounts: list,
+    date_str: str | None = None,
+) -> list:
+    """Append one credit row per invoice in a single workbook open/save cycle.
+
+    Returns list of (invoice_no, amount) tuples that were written.
+    Balance is recalculated once after all rows are appended.
+    """
+    path = ledger_path(company_name)
+    if not path.exists():
+        raise FileNotFoundError(f"No ledger file for {company_name!r}. Create it first.")
+    wb = openpyxl.load_workbook(path)
+    ws = wb.active
+    entry_date = date_str or _date.today().strftime("%d-%m-%Y")
+    written: list = []
+    for inv_no, amount in zip(invoices, amounts):
+        row = _next_data_row(ws)
+        _write_row(ws, row, entry_date, str(inv_no), "Payment received", None, float(amount))
+        written.append((str(inv_no), float(amount)))
+    _recalculate_balance(ws)
+    wb.save(path)
+    logger.info("Multi-credit rows added: %s  invoices=%s  date=%s", company_name, invoices, entry_date)
+    return written
+
+
 # ── Public read operations ────────────────────────────────────────────────────
 
 def get_ledger_summary(company_name: str) -> dict | None:
