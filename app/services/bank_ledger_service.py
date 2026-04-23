@@ -193,13 +193,25 @@ def generate_bank_statement(
     as_pdf: bool = False,
 ) -> dict:
     """
-    Generate a formatted statement Excel for the given month/year.
+    Generate a print-ready A4 portrait statement Excel (and optionally PDF).
+
+    Fixed row layout (never uses ws.append so row numbers are deterministic):
+      Row 1  : Title bar
+      Row 2  : Spacer
+      Rows 3-6 : Summary (Opening Balance / Total In / Total Out / Closing Balance)
+      Row 7  : Spacer
+      Row 8  : Table header
+      Row 9+ : Transaction rows
+
+    Print settings: A4 portrait, fit-to-1-page-wide, fit-to-1-page-tall when
+    ≤ 25 data rows (forces single-page PDF for small/test data).
 
     Returns dict with keys:
       xlsx_path, pdf_path, opening_balance, total_in, total_out,
       closing_balance, row_count, month_name
     """
     from app.services.pdf_export import export_to_pdf
+    from openpyxl.worksheet.properties import PageSetupProperties
 
     month_name  = _MONTH_NAMES[month] if 1 <= month <= 12 else str(month)
     ledger_path = _ledger_path(year)
@@ -240,65 +252,119 @@ def generate_bank_statement(
     total_out = round(sum(r["out"] for r in period_rows), 2)
     closing   = round(opening_balance + total_in - total_out, 2)
 
-    # ── Build statement workbook ──────────────────────────────────────────────
+    # ── Output path ───────────────────────────────────────────────────────────
     stmt_folder = Path(settings.BANK_LEDGER_BASE_PATH) / str(year) / str(month).zfill(2)
     stmt_folder.mkdir(parents=True, exist_ok=True)
+    today_str = _date.today().strftime("%d-%m-%Y")
+    xlsx_path = stmt_folder / f"{today_str} BANK STATEMENT {month_name.upper()} {year}.xlsx"
 
-    today_str  = _date.today().strftime("%d-%m-%Y")
-    xlsx_path  = stmt_folder / f"{today_str} BANK STATEMENT {month_name.upper()} {year}.xlsx"
-
+    # ── Build workbook ────────────────────────────────────────────────────────
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = f"{month_name[:3]} {year}"
 
-    for i, w in enumerate(_COL_WIDTHS, 1):
+    # ── A4 portrait print setup ───────────────────────────────────────────────
+    ws.page_setup.paperSize   = 9            # A4
+    ws.page_setup.orientation = "portrait"
+    ws.page_margins.left   = 0.5
+    ws.page_margins.right  = 0.5
+    ws.page_margins.top    = 0.75
+    ws.page_margins.bottom = 0.75
+    ws.page_margins.header = 0.3
+    ws.page_margins.footer = 0.3
+    ws.print_options.horizontalCentered = True
+
+    # Fit to page: always 1 page wide; 1 page tall for small data
+    ws.sheet_properties.pageSetUpPr = PageSetupProperties(fitToPage=True)
+    ws.page_setup.fitToWidth  = 1
+    ws.page_setup.fitToHeight = 1 if len(period_rows) <= 25 else 0
+
+    # ── Column widths (A4 portrait proportions) ───────────────────────────────
+    # Total ≈ 119 units; fitToWidth=1 scales automatically if wider than page
+    _STMT_WIDTHS = [12, 10, 14, 16, 20, 11, 11, 13, 12]   # A-I
+    for i, w in enumerate(_STMT_WIDTHS, 1):
         ws.column_dimensions[get_column_letter(i)].width = w
 
-    # Title row
+    # ── Row 1: Title ──────────────────────────────────────────────────────────
     ws.merge_cells("A1:I1")
-    tc = ws["A1"]
-    tc.value     = f"BANK STATEMENT — {month_name.upper()} {year}"
-    tc.font      = Font(bold=True, size=14, color="FFFFFF")
+    tc = ws.cell(1, 1)
+    tc.value     = f"BANK STATEMENT  {month_name.upper()} {year}"
+    tc.font      = Font(bold=True, size=16, color="FFFFFF")
     tc.fill      = _HDR_FILL
-    tc.alignment = _CENTER
-    ws.row_dimensions[1].height = 30
+    tc.alignment = Alignment(horizontal="center", vertical="center")
+    ws.row_dimensions[1].height = 40
 
-    # Summary block
-    _SUMMARY_FILL = PatternFill("solid", fgColor="EBF3FB")
-    for i, (label, val, bold) in enumerate([
+    # ── Row 2: Spacer ─────────────────────────────────────────────────────────
+    ws.row_dimensions[2].height = 6
+
+    # ── Rows 3-6: Summary block ───────────────────────────────────────────────
+    _SUMM_FILL    = PatternFill("solid", fgColor="EBF3FB")
+    _CLOSING_FILL = PatternFill("solid", fgColor="D0E8F5")
+    _SUMM_THIN    = Border(
+        left=Side(style="thin"), right=Side(style="thin"),
+        top=Side(style="thin"),  bottom=Side(style="thin"),
+    )
+
+    summary_items = [
         ("Opening Balance:", f"AED {opening_balance:,.2f}", False),
         ("Total In:",        f"AED {total_in:,.2f}",        False),
         ("Total Out:",       f"AED {total_out:,.2f}",       False),
         ("Closing Balance:", f"AED {closing:,.2f}",         True),
-    ], 2):
-        ws.merge_cells(f"A{i}:D{i}")
-        ws.merge_cells(f"E{i}:I{i}")
-        lc, vc = ws.cell(i, 1), ws.cell(i, 5)
-        lc.value = label
-        vc.value = val
-        lc.font  = Font(bold=True,  size=11)
-        vc.font  = Font(bold=bold, size=11)
-        lc.fill  = vc.fill = _SUMMARY_FILL
-        lc.alignment = _LEFT
-        vc.alignment = _LEFT
+    ]
+    for r_idx, (label, val, is_closing) in enumerate(summary_items, 3):
+        fill = _CLOSING_FILL if is_closing else _SUMM_FILL
+        ws.merge_cells(f"A{r_idx}:D{r_idx}")
+        ws.merge_cells(f"E{r_idx}:I{r_idx}")
 
-    ws.append([""] * 9)   # blank separator
+        lc = ws.cell(r_idx, 1)
+        lc.value     = label
+        lc.font      = Font(bold=True, size=11)
+        lc.fill      = fill
+        lc.alignment = Alignment(horizontal="left", vertical="center", indent=1)
+        lc.border    = _SUMM_THIN
 
-    # Header row
-    hdr_row = ws.max_row + 1
-    ws.append(_HEADERS)
-    _style_header_row(ws, hdr_row)
+        vc = ws.cell(r_idx, 5)
+        vc.value     = val
+        vc.font      = Font(bold=is_closing, size=11,
+                            color="1F4E79" if is_closing else "000000")
+        vc.fill      = fill
+        vc.alignment = Alignment(horizontal="right", vertical="center", indent=1)
+        vc.border    = _SUMM_THIN
+        ws.row_dimensions[r_idx].height = 22
 
-    # Data rows
-    for r in period_rows:
-        ws.append([
+    # ── Row 7: Spacer ─────────────────────────────────────────────────────────
+    ws.row_dimensions[7].height = 6
+
+    # ── Row 8: Table header ────────────────────────────────────────────────────
+    _HDR_ROW = 8
+    for c_idx, h in enumerate(_HEADERS, 1):
+        cell = ws.cell(_HDR_ROW, c_idx)
+        cell.value     = h
+        cell.font      = _HDR_FONT
+        cell.fill      = _HDR_FILL
+        cell.alignment = _CENTER
+        cell.border    = _THIN
+    ws.row_dimensions[_HDR_ROW].height = 22
+
+    # ── Rows 9+: Transaction data ──────────────────────────────────────────────
+    for i, r in enumerate(period_rows):
+        row_n = 9 + i
+        row_data = [
             r["date"], r["type"], r["mode"], r["party"], r["description"],
             r["in"]  or None,
             r["out"] or None,
             r["balance"] if r["balance"] else None,
             r["notes"],
-        ])
-        _style_data_row(ws, ws.max_row, r["type"] == "Incoming")
+        ]
+        for c_idx, val in enumerate(row_data, 1):
+            ws.cell(row_n, c_idx).value = val
+        _style_data_row(ws, row_n, r["type"] == "Incoming")
+        ws.row_dimensions[row_n].height = 18
+
+    # ── Print area and repeating header ───────────────────────────────────────
+    last_row = 8 + len(period_rows)
+    ws.print_area        = f"A1:I{last_row}"
+    ws.print_title_rows  = f"{_HDR_ROW}:{_HDR_ROW}"
 
     wb.save(xlsx_path)
     logger.info("Bank statement Excel: %s  rows=%d", xlsx_path, len(period_rows))
