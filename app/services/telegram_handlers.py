@@ -123,6 +123,18 @@ _DATE_RE = _re.compile(
     _re.I,
 )
 
+# Bank ledger direct-route detector — matches all bank command prefixes.
+# "payment received" without "invoice" is handled by a separate inline check.
+_BANK_DIRECT_RE = _re.compile(
+    r"^(?:bank\s|"
+    r"online\s+payment\s+received\b|"
+    r"cheque\s+received\b|"
+    r"cash\s+received\b|"
+    r"cheque\s+withdrawn\b|"
+    r"expense\s)",
+    _re.I,
+)
+
 
 def _extract_date(text: str) -> str:
     """Return the date from 'date DD-MM-YYYY' / 'date YYYY-MM-DD' in text,
@@ -176,6 +188,16 @@ _HELP = (
     "send municipality\n"
     "send establishment card</pre>\n"
     "<i>Typo-tolerant: 'send licens' → Trade License</i>\n\n"
+    "<b>── Bank Ledger ──</b>\n"
+    "<pre>online payment received PARTY amount N\n"
+    "cheque received PARTY amount N\n"
+    "cash received PARTY amount N\n"
+    "cheque withdrawn N for REASON\n"
+    "expense DESCRIPTION amount N\n"
+    "bank payment PARTY amount N\n"
+    "bank balance\n"
+    "bank statement april 2026\n"
+    "bank statement april 2026 pdf</pre>\n\n"
     "<i>Aliases: gulf, islami, quant, globol, tayseer arar, tayseer containers</i>"
 )
 
@@ -248,6 +270,18 @@ async def handle_message(
         else:
             print(f"[DIRECT] greeting  text={text!r}", flush=True)
             await send_text(bot, chat_id, _WELCOME)
+        return
+
+    # ── Bank ledger — before customer-payment route to avoid conflicts ───────────
+    # "payment received" with no "invoice" keyword → bank incoming transfer.
+    if (_BANK_DIRECT_RE.match(t) or
+            (t.startswith("payment received") and "invoice" not in t)):
+        print(f"[DIRECT] bank  text={text!r}", flush=True)
+        try:
+            await _handle_bank_command(text, chat_id, bot)
+        except Exception as exc:
+            logger.exception("bank command error")
+            await send_text(bot, chat_id, f"❌ Error:\n<code>{exc}</code>")
         return
 
     if t.startswith("payment received"):
@@ -1179,6 +1213,103 @@ async def _handle_send_doc(text: str, chat_id: int, bot) -> None:
     await send_text(bot, chat_id,
         f"📂 Multiple files found for <b>{query}</b>:\n\n{names}\n\n"
         "Please be more specific.")
+
+
+# ── Bank ledger handler ───────────────────────────────────────────────────────
+
+async def _handle_bank_command(text: str, chat_id: int, bot) -> None:
+    from app.services.bank_ledger_parser import parse_bank_command, BankEntry, BankStatement
+    from app.services.bank_ledger_service import (
+        add_bank_entry, get_bank_balance, generate_bank_statement,
+    )
+
+    result = parse_bank_command(text)
+
+    # ── Balance query ─────────────────────────────────────────────────────────
+    if result == "balance":
+        balance = get_bank_balance()
+        await send_text(bot, chat_id,
+            "🏦 <b>Bank Balance</b>\n\n"
+            f"Current Balance: <b>AED {balance:,.2f}</b>")
+        return
+
+    # ── Statement ─────────────────────────────────────────────────────────────
+    if isinstance(result, BankStatement):
+        m_names = ["", "January", "February", "March", "April", "May", "June",
+                   "July", "August", "September", "October", "November", "December"]
+        month_name = m_names[result.month] if 1 <= result.month <= 12 else str(result.month)
+        await send_text(bot, chat_id,
+            f"📊 Generating bank statement for <b>{month_name} {result.year}</b>…")
+        stmt = generate_bank_statement(result.month, result.year, as_pdf=result.as_pdf)
+        caption = (
+            f"🏦 <b>Bank Statement — {month_name} {result.year}</b>\n\n"
+            f"Opening Balance: <b>AED {stmt['opening_balance']:,.2f}</b>\n"
+            f"Total In:        <b>AED {stmt['total_in']:,.2f}</b>\n"
+            f"Total Out:       <b>AED {stmt['total_out']:,.2f}</b>\n"
+            f"Closing Balance: <b>AED {stmt['closing_balance']:,.2f}</b>\n\n"
+            f"Transactions: {stmt['row_count']}"
+        )
+        await send_text(bot, chat_id, caption)
+        if stmt["pdf_path"]:
+            from pathlib import Path as _Path
+            p = _Path(stmt["pdf_path"])
+            await send_document(bot, chat_id, str(p), f"📄 {p.name}")
+        else:
+            p = stmt["xlsx_path"]
+            await send_document(bot, chat_id, str(p), f"📊 {p.name}")
+        return
+
+    # ── Transaction entry ─────────────────────────────────────────────────────
+    if isinstance(result, BankEntry):
+        new_balance = add_bank_entry(
+            transaction_type=result.transaction_type,
+            mode=result.mode,
+            party=result.party,
+            description=result.description,
+            amount_in=result.amount_in,
+            amount_out=result.amount_out,
+            notes=result.notes,
+        )
+
+        is_incoming = result.transaction_type == "Incoming"
+        icon        = "✅"
+        type_icon   = "📥" if is_incoming else "📤"
+        amount_label = "Amount In" if is_incoming else "Amount Out"
+        amount_val   = result.amount_in if is_incoming else result.amount_out
+
+        lines = [
+            f"{icon} <b>Bank Entry Added</b>",
+            "",
+            f"Type:    {type_icon} <b>{result.transaction_type}</b>",
+            f"Mode:    {result.mode}",
+        ]
+        if result.party:
+            lines.append(f"Party:   <b>{result.party.upper()}</b>")
+        if result.notes:
+            lines.append(f"Notes:   {result.notes}")
+        lines += [
+            f"{amount_label}: <b>AED {amount_val:,.2f}</b>",
+            f"Balance: <b>AED {new_balance:,.2f}</b>",
+        ]
+        await send_text(bot, chat_id, "\n".join(lines))
+        return
+
+    # Unrecognised bank command
+    await send_text(bot, chat_id,
+        "❌ Bank command not recognised.\n\n"
+        "<b>Incoming:</b>\n"
+        "<pre>online payment received PARTY amount N\n"
+        "cheque received PARTY amount N\n"
+        "cash received PARTY amount N\n"
+        "payment received PARTY amount N</pre>\n\n"
+        "<b>Outgoing:</b>\n"
+        "<pre>cheque withdrawn N for REASON\n"
+        "expense DESCRIPTION amount N\n"
+        "bank payment PARTY amount N</pre>\n\n"
+        "<b>Queries:</b>\n"
+        "<pre>bank balance\n"
+        "bank statement april 2026\n"
+        "bank statement april 2026 pdf</pre>")
 
 
 # ── Account statement ─────────────────────────────────────────────────────────

@@ -94,6 +94,11 @@ class Settings(BaseSettings):
     # Sub-folder per year: G:\...\Ledger\2026\COMPANY NAME.xlsx
     LEDGER_BASE_PATH: str = r"G:\NEW DATA 2021\DRIVE\Ledger\2026"
 
+    # ── Bank Ledger ────────────────────────────────────────────────────────────
+    # Root folder for the bank account transaction ledger.
+    # Files: BANK_LEDGER_YYYY.xlsx  plus  YYYY\MM\ for generated statements.
+    BANK_LEDGER_BASE_PATH: str = r"G:\NEW DATA 2021\DRIVE\BANK LEDGER"
+
     # ── Account Statements ─────────────────────────────────────────────────────
     # Root folder for generated account statements.
     # Auto sub-folders: G:\...\Account Statement\<YEAR>\<MM>\
