@@ -121,6 +121,15 @@ def _last_balance(ws) -> float:
     return last
 
 
+def _next_row(ws) -> int:
+    """Return the row number for the next entry (one after the last non-empty data row)."""
+    last = 1  # row 1 is always the header
+    for i, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
+        if any(v is not None for v in row):
+            last = i
+    return last + 1
+
+
 def _parse_date(s: str) -> "_date | None":
     for fmt in ("%d-%m-%Y", "%Y-%m-%d", "%d/%m/%Y"):
         try:
@@ -143,35 +152,38 @@ def add_bank_entry(
     date_str: "str | None" = None,
 ) -> float:
     """
-    Append a row to the current year's bank ledger and return the new balance.
+    Append a row to the correct year's bank ledger and return the new balance.
+    If date_str is provided it determines which year's workbook receives the entry.
     All text fields are stored uppercase for consistency.
     """
-    today    = _date.today()
-    year     = today.year
-    date_str = date_str or today.strftime("%d-%m-%Y")
+    today = _date.today()
+    if date_str:
+        parsed_d = _parse_date(date_str)
+        year = parsed_d.year if parsed_d else today.year
+    else:
+        year     = today.year
+        date_str = today.strftime("%d-%m-%Y")
 
     wb, ws, path = _open_or_create(year)
     prev_bal = _last_balance(ws)
     new_bal  = round(prev_bal + amount_in - amount_out, 2)
 
-    row_num = ws.max_row + 1
-    ws.append([
-        date_str,
-        transaction_type,
-        mode,
-        party.upper()       if party       else "",
-        description.upper() if description else "",
-        amount_in  if amount_in  else None,
-        amount_out if amount_out else None,
-        new_bal,
-        notes.upper() if notes else "",
-    ])
+    row_num = _next_row(ws)
+    ws.cell(row_num, _C_DATE).value  = date_str
+    ws.cell(row_num, _C_TYPE).value  = transaction_type
+    ws.cell(row_num, _C_MODE).value  = mode
+    ws.cell(row_num, _C_PARTY).value = party.upper()       if party       else ""
+    ws.cell(row_num, _C_DESC).value  = description.upper() if description else ""
+    ws.cell(row_num, _C_IN).value    = amount_in  if amount_in  else None
+    ws.cell(row_num, _C_OUT).value   = amount_out if amount_out else None
+    ws.cell(row_num, _C_BAL).value   = new_bal
+    ws.cell(row_num, _C_NOTES).value = notes.upper() if notes else ""
     _style_data_row(ws, row_num, transaction_type == "Incoming")
 
     wb.save(path)
     logger.info(
-        "Bank entry: %s %s  party=%r  in=%.2f  out=%.2f  bal=%.2f",
-        transaction_type, mode, party, amount_in, amount_out, new_bal,
+        "Bank entry: %s %s  party=%r  in=%.2f  out=%.2f  bal=%.2f  row=%d",
+        transaction_type, mode, party, amount_in, amount_out, new_bal, row_num,
     )
     return new_bal
 

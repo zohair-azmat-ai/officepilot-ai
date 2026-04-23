@@ -1269,13 +1269,15 @@ async def _handle_bank_command(text: str, chat_id: int, bot) -> None:
             amount_in=result.amount_in,
             amount_out=result.amount_out,
             notes=result.notes,
+            date_str=result.date_str or None,
         )
 
-        is_incoming = result.transaction_type == "Incoming"
-        icon        = "✅"
-        type_icon   = "📥" if is_incoming else "📤"
+        is_incoming  = result.transaction_type == "Incoming"
+        icon         = "✅"
+        type_icon    = "📥" if is_incoming else "📤"
         amount_label = "Amount In" if is_incoming else "Amount Out"
         amount_val   = result.amount_in if is_incoming else result.amount_out
+        entry_date   = result.date_str or _date.today().strftime("%d-%m-%Y")
 
         lines = [
             f"{icon} <b>Bank Entry Added</b>",
@@ -1286,8 +1288,9 @@ async def _handle_bank_command(text: str, chat_id: int, bot) -> None:
         if result.party:
             lines.append(f"Party:   <b>{result.party.upper()}</b>")
         if result.notes:
-            lines.append(f"Notes:   {result.notes}")
+            lines.append(f"Notes:   {result.notes.upper()}")
         lines += [
+            f"Date:    <code>{entry_date}</code>",
             f"{amount_label}: <b>AED {amount_val:,.2f}</b>",
             f"Balance: <b>AED {new_balance:,.2f}</b>",
         ]
