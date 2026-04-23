@@ -1261,7 +1261,7 @@ async def _handle_bank_command(text: str, chat_id: int, bot) -> None:
 
     # ── Transaction entry ─────────────────────────────────────────────────────
     if isinstance(result, BankEntry):
-        new_balance = add_bank_entry(
+        new_balance, txn_id = add_bank_entry(
             transaction_type=result.transaction_type,
             mode=result.mode,
             party=result.party,
@@ -1282,6 +1282,7 @@ async def _handle_bank_command(text: str, chat_id: int, bot) -> None:
         lines = [
             f"{icon} <b>Bank Entry Added</b>",
             "",
+            f"Txn ID:  <code>{txn_id}</code>",
             f"Type:    {type_icon} <b>{result.transaction_type}</b>",
             f"Mode:    {result.mode}",
         ]

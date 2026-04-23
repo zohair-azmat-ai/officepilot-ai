@@ -9,8 +9,9 @@ Storage layout:
       DD-MM-YYYY BANK STATEMENT APRIL 2026.pdf
 
 Sheet columns:
-  A  Date          B  Type       C  Mode         D  Party/Company
-  E  Description   F  In         G  Out          H  Balance    I  Notes
+  A  Txn ID        B  Date        C  Type         D  Mode
+  E  Party/Company F  Description G  In           H  Out
+  I  Balance       J  Notes
 """
 
 import logging
@@ -26,17 +27,18 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 # ── Column indices (1-based, for openpyxl) ────────────────────────────────────
-_C_DATE  = 1   # A
-_C_TYPE  = 2   # B
-_C_MODE  = 3   # C
-_C_PARTY = 4   # D
-_C_DESC  = 5   # E
-_C_IN    = 6   # F
-_C_OUT   = 7   # G
-_C_BAL   = 8   # H
-_C_NOTES = 9   # I
+_C_TXN   = 1   # A  — transaction ID (TXN-0001 …)
+_C_DATE  = 2   # B
+_C_TYPE  = 3   # C
+_C_MODE  = 4   # D
+_C_PARTY = 5   # E
+_C_DESC  = 6   # F
+_C_IN    = 7   # G
+_C_OUT   = 8   # H
+_C_BAL   = 9   # I
+_C_NOTES = 10  # J
 
-_HEADERS = ["Date", "Type", "Mode", "Party/Company",
+_HEADERS = ["Txn ID", "Date", "Type", "Mode", "Party/Company",
             "Description", "In", "Out", "Balance", "Notes"]
 
 _MONTH_NAMES = ["", "January", "February", "March", "April", "May", "June",
@@ -56,7 +58,7 @@ _LEFT   = Alignment(horizontal="left",   vertical="center", wrap_text=True)
 _RIGHT  = Alignment(horizontal="right",  vertical="center")
 _MONEY  = '#,##0.00'
 
-_COL_WIDTHS = [14, 12, 18, 25, 30, 14, 14, 16, 20]
+_COL_WIDTHS = [10, 14, 12, 18, 25, 30, 14, 14, 16, 20]   # A-J
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -85,7 +87,7 @@ def _style_data_row(ws, row: int, is_incoming: bool) -> None:
         if col in (_C_IN, _C_OUT, _C_BAL):
             cell.number_format = _MONEY
             cell.alignment     = _RIGHT
-        elif col == _C_DATE:
+        elif col in (_C_TXN, _C_DATE):
             cell.alignment = _CENTER
         else:
             cell.alignment = _LEFT
@@ -130,6 +132,21 @@ def _next_row(ws) -> int:
     return last + 1
 
 
+def _last_txn_number(ws) -> int:
+    """Return the highest TXN sequence number already in the sheet (0 if none)."""
+    last = 0
+    for row in ws.iter_rows(min_row=2, values_only=True):
+        val = row[_C_TXN - 1]
+        if val and isinstance(val, str) and val.upper().startswith("TXN-"):
+            try:
+                n = int(val[4:])
+                if n > last:
+                    last = n
+            except ValueError:
+                pass
+    return last
+
+
 def _parse_date(s: str) -> "_date | None":
     for fmt in ("%d-%m-%Y", "%Y-%m-%d", "%d/%m/%Y"):
         try:
@@ -168,7 +185,11 @@ def add_bank_entry(
     prev_bal = _last_balance(ws)
     new_bal  = round(prev_bal + amount_in - amount_out, 2)
 
+    txn_no = _last_txn_number(ws) + 1
+    txn_id = f"TXN-{txn_no:04d}"
+
     row_num = _next_row(ws)
+    ws.cell(row_num, _C_TXN).value   = txn_id
     ws.cell(row_num, _C_DATE).value  = date_str
     ws.cell(row_num, _C_TYPE).value  = transaction_type
     ws.cell(row_num, _C_MODE).value  = mode
@@ -182,10 +203,10 @@ def add_bank_entry(
 
     wb.save(path)
     logger.info(
-        "Bank entry: %s %s  party=%r  in=%.2f  out=%.2f  bal=%.2f  row=%d",
-        transaction_type, mode, party, amount_in, amount_out, new_bal, row_num,
+        "Bank entry: %s %s %s  party=%r  in=%.2f  out=%.2f  bal=%.2f  row=%d",
+        txn_id, transaction_type, mode, party, amount_in, amount_out, new_bal, row_num,
     )
-    return new_bal
+    return new_bal, txn_id
 
 
 def get_bank_balance(year: "int | None" = None) -> float:
@@ -237,6 +258,7 @@ def generate_bank_statement(
             if not any(row):
                 continue
             all_rows.append({
+                "txn_id":      str(row[_C_TXN   - 1] or ""),
                 "date":        str(row[_C_DATE  - 1] or "").strip(),
                 "type":        str(row[_C_TYPE  - 1] or ""),
                 "mode":        str(row[_C_MODE  - 1] or ""),
@@ -292,13 +314,13 @@ def generate_bank_statement(
     ws.page_setup.fitToHeight = 1 if len(period_rows) <= 25 else 0
 
     # ── Column widths (A4 portrait proportions) ───────────────────────────────
-    # Total ≈ 119 units; fitToWidth=1 scales automatically if wider than page
-    _STMT_WIDTHS = [12, 10, 14, 16, 20, 11, 11, 13, 12]   # A-I
+    # Total ≈ 129 units; fitToWidth=1 scales automatically if wider than page
+    _STMT_WIDTHS = [9, 12, 10, 14, 16, 20, 11, 11, 13, 12]   # A-J
     for i, w in enumerate(_STMT_WIDTHS, 1):
         ws.column_dimensions[get_column_letter(i)].width = w
 
     # ── Row 1: Title ──────────────────────────────────────────────────────────
-    ws.merge_cells("A1:I1")
+    ws.merge_cells("A1:J1")
     tc = ws.cell(1, 1)
     tc.value     = f"BANK STATEMENT  {month_name.upper()} {year}"
     tc.font      = Font(bold=True, size=16, color="FFFFFF")
@@ -325,8 +347,8 @@ def generate_bank_statement(
     ]
     for r_idx, (label, val, is_closing) in enumerate(summary_items, 3):
         fill = _CLOSING_FILL if is_closing else _SUMM_FILL
-        ws.merge_cells(f"A{r_idx}:D{r_idx}")
-        ws.merge_cells(f"E{r_idx}:I{r_idx}")
+        ws.merge_cells(f"A{r_idx}:E{r_idx}")
+        ws.merge_cells(f"F{r_idx}:J{r_idx}")
 
         lc = ws.cell(r_idx, 1)
         lc.value     = label
@@ -335,7 +357,7 @@ def generate_bank_statement(
         lc.alignment = Alignment(horizontal="left", vertical="center", indent=1)
         lc.border    = _SUMM_THIN
 
-        vc = ws.cell(r_idx, 5)
+        vc = ws.cell(r_idx, 6)
         vc.value     = val
         vc.font      = Font(bold=is_closing, size=11,
                             color="1F4E79" if is_closing else "000000")
@@ -362,6 +384,7 @@ def generate_bank_statement(
     for i, r in enumerate(period_rows):
         row_n = 9 + i
         row_data = [
+            r["txn_id"],
             r["date"], r["type"], r["mode"], r["party"], r["description"],
             r["in"]  or None,
             r["out"] or None,
@@ -375,7 +398,7 @@ def generate_bank_statement(
 
     # ── Print area and repeating header ───────────────────────────────────────
     last_row = 8 + len(period_rows)
-    ws.print_area        = f"A1:I{last_row}"
+    ws.print_area        = f"A1:J{last_row}"
     ws.print_title_rows  = f"{_HDR_ROW}:{_HDR_ROW}"
 
     wb.save(xlsx_path)
