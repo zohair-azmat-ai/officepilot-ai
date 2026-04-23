@@ -147,6 +147,24 @@ def _last_txn_number(ws) -> int:
     return last
 
 
+def _recalculate_balances(ws) -> None:
+    """Recompute the running Balance column for every non-empty data row in sheet order."""
+    balance = 0.0
+    for row_cells in ws.iter_rows(min_row=2):
+        if not any(c.value for c in row_cells):
+            continue
+        try:
+            in_val  = float(row_cells[_C_IN  - 1].value or 0)
+        except (TypeError, ValueError):
+            in_val = 0.0
+        try:
+            out_val = float(row_cells[_C_OUT - 1].value or 0)
+        except (TypeError, ValueError):
+            out_val = 0.0
+        balance = round(balance + in_val - out_val, 2)
+        row_cells[_C_BAL - 1].value = balance
+
+
 def _parse_date(s: str) -> "_date | None":
     for fmt in ("%d-%m-%Y", "%Y-%m-%d", "%d/%m/%Y"):
         try:
@@ -218,6 +236,140 @@ def get_bank_balance(year: "int | None" = None) -> float:
     wb = openpyxl.load_workbook(path, data_only=True)
     ws = wb["Transactions"] if "Transactions" in wb.sheetnames else wb.active
     return _last_balance(ws)
+
+
+def check_duplicate(party: str, amount: float, date_str: str) -> bool:
+    """
+    Return True if a row with the same date, party (case-insensitive), and
+    amount (±0.01) already exists in the ledger for that date's year.
+    """
+    today   = _date.today()
+    parsed  = _parse_date(date_str) if date_str else None
+    year    = parsed.year if parsed else today.year
+    eff_dt  = date_str or today.strftime("%d-%m-%Y")
+
+    path = _ledger_path(year)
+    if not path.exists():
+        return False
+
+    wb = openpyxl.load_workbook(path, data_only=True)
+    ws = wb["Transactions"] if "Transactions" in wb.sheetnames else wb.active
+    for row in ws.iter_rows(min_row=2, values_only=True):
+        r_date   = str(row[_C_DATE  - 1] or "").strip()
+        r_party  = str(row[_C_PARTY - 1] or "").strip().upper()
+        r_in     = float(row[_C_IN  - 1] or 0)
+        r_out    = float(row[_C_OUT - 1] or 0)
+        r_amount = r_in or r_out
+        if (r_date == eff_dt and
+                r_party == party.strip().upper() and
+                abs(r_amount - amount) < 0.01):
+            return True
+    return False
+
+
+def delete_bank_entry(txn_id: str, year: "int | None" = None) -> "dict | None":
+    """
+    Remove the row matching txn_id and recalculate all running balances.
+    Returns a dict summarising the deleted row, or None if not found.
+    """
+    year = year or _date.today().year
+    wb, ws, path = _open_or_create(year)
+
+    target_row   = None
+    deleted_info: dict = {}
+    for i, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
+        if str(row[_C_TXN - 1] or "").upper() == txn_id.upper():
+            target_row = i
+            deleted_info = {
+                "txn_id": str(row[_C_TXN   - 1] or ""),
+                "date":   str(row[_C_DATE  - 1] or ""),
+                "type":   str(row[_C_TYPE  - 1] or ""),
+                "party":  str(row[_C_PARTY - 1] or ""),
+                "in":     float(row[_C_IN  - 1] or 0),
+                "out":    float(row[_C_OUT - 1] or 0),
+            }
+            break
+
+    if target_row is None:
+        return None
+
+    ws.delete_rows(target_row)
+    _recalculate_balances(ws)
+    wb.save(path)
+    logger.info("Deleted bank entry: %s", txn_id)
+    return deleted_info
+
+
+def edit_bank_entry(
+    txn_id: str,
+    field:  str,
+    value:  str,
+    year:   "int | None" = None,
+) -> "dict | None":
+    """
+    Update one field of an existing entry and recalculate all running balances.
+
+    Supported fields: amount | in | out | party | notes | description | date
+    Returns {"txn_id", "field", "value"} on success, None if not found / bad field.
+    """
+    year = year or _date.today().year
+    wb, ws, path = _open_or_create(year)
+
+    target_row = None
+    for i, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
+        if str(row[_C_TXN - 1] or "").upper() == txn_id.upper():
+            target_row = i
+            break
+
+    if target_row is None:
+        return None
+
+    f = field.lower()
+
+    if f == "amount":
+        try:
+            amt = float(value.replace(",", ""))
+        except ValueError:
+            return None
+        txn_type = str(ws.cell(target_row, _C_TYPE).value or "").lower()
+        if "incoming" in txn_type:
+            ws.cell(target_row, _C_IN).value  = amt
+            ws.cell(target_row, _C_OUT).value = None
+        else:
+            ws.cell(target_row, _C_OUT).value = amt
+            ws.cell(target_row, _C_IN).value  = None
+
+    elif f == "in":
+        try:
+            ws.cell(target_row, _C_IN).value = float(value.replace(",", ""))
+        except ValueError:
+            return None
+
+    elif f == "out":
+        try:
+            ws.cell(target_row, _C_OUT).value = float(value.replace(",", ""))
+        except ValueError:
+            return None
+
+    elif f == "party":
+        ws.cell(target_row, _C_PARTY).value = value.strip().upper()
+
+    elif f in ("notes", "note"):
+        ws.cell(target_row, _C_NOTES).value = value.strip().upper()
+
+    elif f in ("desc", "description"):
+        ws.cell(target_row, _C_DESC).value = value.strip().upper()
+
+    elif f == "date":
+        ws.cell(target_row, _C_DATE).value = value.strip()
+
+    else:
+        return None
+
+    _recalculate_balances(ws)
+    wb.save(path)
+    logger.info("Edited bank entry: %s  %s=%s", txn_id, field, value)
+    return {"txn_id": txn_id, "field": field, "value": value}
 
 
 def generate_bank_statement(

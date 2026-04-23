@@ -50,6 +50,10 @@ _STMT_MONTH_NAMES = [
 # Keys per entry: company, invoice, date, amount, lpo
 _pending_ocr: dict[int, dict] = {}
 
+# ── Pending bank entry (duplicate confirmation) ───────────────────────────────
+# Stores a BankEntry awaiting YES/NO from the user before it is written.
+_pending_bank_entry: dict = {}   # chat_id → BankEntry
+
 # ── Conversational session state (chat_id → session dict) ────────────────────
 # Persists within a single backend process lifetime (resets on restart).
 _sessions: dict[int, dict] = {}
@@ -131,7 +135,9 @@ _BANK_DIRECT_RE = _re.compile(
     r"cheque\s+received\b|"
     r"cash\s+received\b|"
     r"cheque\s+withdrawn\b|"
-    r"expense\s)",
+    r"expense\s|"
+    r"delete\s+txn\b|"
+    r"edit\s+txn\b)",
     _re.I,
 )
 
@@ -198,6 +204,13 @@ _HELP = (
     "bank balance\n"
     "bank statement april 2026\n"
     "bank statement april 2026 pdf</pre>\n\n"
+    "<i>Optional: append  noted NOTES  and/or  date DD-MM-YYYY  to any entry.</i>\n\n"
+    "<b>── Bank Edit / Delete ──</b>\n"
+    "<pre>delete txn TXN-0003\n"
+    "edit txn TXN-0003 amount 7000\n"
+    "edit txn TXN-0003 party GULF EXTRUSION LLC\n"
+    "edit txn TXN-0003 notes INVOICE 9999\n"
+    "edit txn TXN-0003 date 15-04-2026</pre>\n\n"
     "<i>Aliases: gulf, islami, quant, globol, tayseer arar, tayseer containers</i>"
 )
 
@@ -237,6 +250,18 @@ async def handle_message(
         return
 
     bot = context.bot
+
+    # ── Pending bank-entry duplicate confirmation ─────────────────────────────
+    if chat_id in _pending_bank_entry:
+        tl = text.lower().strip()
+        if tl in ("yes", "ok", "confirm", "y"):
+            await _confirm_bank_entry(chat_id, bot)
+            return
+        if tl in ("no", "cancel", "nope", "n"):
+            del _pending_bank_entry[chat_id]
+            await send_text(bot, chat_id, "❌ Entry cancelled.")
+            return
+        # fall through to normal routing for anything else
 
     # ── Pending OCR confirmation ───────────────────────────────────────────────
     if chat_id in _pending_ocr:
@@ -1217,10 +1242,54 @@ async def _handle_send_doc(text: str, chat_id: int, bot) -> None:
 
 # ── Bank ledger handler ───────────────────────────────────────────────────────
 
+async def _confirm_bank_entry(chat_id: int, bot) -> None:
+    """Commit a bank entry that was held pending duplicate confirmation."""
+    from app.services.bank_ledger_service import add_bank_entry
+
+    entry = _pending_bank_entry.pop(chat_id)
+    new_balance, txn_id = add_bank_entry(
+        transaction_type=entry.transaction_type,
+        mode=entry.mode,
+        party=entry.party,
+        description=entry.description,
+        amount_in=entry.amount_in,
+        amount_out=entry.amount_out,
+        notes=entry.notes,
+        date_str=entry.date_str or None,
+    )
+
+    is_incoming  = entry.transaction_type == "Incoming"
+    type_icon    = "📥" if is_incoming else "📤"
+    amount_label = "Amount In" if is_incoming else "Amount Out"
+    amount_val   = entry.amount_in if is_incoming else entry.amount_out
+    entry_date   = entry.date_str or _date.today().strftime("%d-%m-%Y")
+
+    lines = [
+        "✅ <b>Bank Entry Added</b>",
+        "",
+        f"Txn ID:  <code>{txn_id}</code>",
+        f"Type:    {type_icon} <b>{entry.transaction_type}</b>",
+        f"Mode:    {entry.mode}",
+    ]
+    if entry.party:
+        lines.append(f"Party:   <b>{entry.party.upper()}</b>")
+    if entry.notes:
+        lines.append(f"Notes:   {entry.notes.upper()}")
+    lines += [
+        f"Date:    <code>{entry_date}</code>",
+        f"{amount_label}: <b>AED {amount_val:,.2f}</b>",
+        f"Balance: <b>AED {new_balance:,.2f}</b>",
+    ]
+    await send_text(bot, chat_id, "\n".join(lines))
+
+
 async def _handle_bank_command(text: str, chat_id: int, bot) -> None:
-    from app.services.bank_ledger_parser import parse_bank_command, BankEntry, BankStatement
+    from app.services.bank_ledger_parser import (
+        parse_bank_command, BankEntry, BankStatement, BankDelete, BankEdit,
+    )
     from app.services.bank_ledger_service import (
         add_bank_entry, get_bank_balance, generate_bank_statement,
+        check_duplicate, delete_bank_entry, edit_bank_entry,
     )
 
     result = parse_bank_command(text)
@@ -1259,8 +1328,56 @@ async def _handle_bank_command(text: str, chat_id: int, bot) -> None:
             await send_document(bot, chat_id, str(p), f"📊 {p.name}")
         return
 
+    # ── Delete ───────────────────────────────────────────────────────────────
+    if isinstance(result, BankDelete):
+        deleted = delete_bank_entry(result.txn_id)
+        if deleted is None:
+            await send_text(bot, chat_id,
+                f"❌ <code>{result.txn_id}</code> not found in this year's ledger.")
+        else:
+            amt = deleted.get("in", 0) or deleted.get("out", 0)
+            await send_text(bot, chat_id,
+                f"🗑️ <b>Entry Deleted</b>\n\n"
+                f"Txn ID: <code>{deleted['txn_id']}</code>\n"
+                f"Date:   <code>{deleted['date']}</code>\n"
+                f"Party:  <b>{deleted['party']}</b>\n"
+                f"Amount: <b>AED {amt:,.2f}</b>\n\n"
+                f"✅ Running balances recalculated.")
+        return
+
+    # ── Edit ─────────────────────────────────────────────────────────────────
+    if isinstance(result, BankEdit):
+        updated = edit_bank_entry(result.txn_id, result.field, result.value)
+        if updated is None:
+            await send_text(bot, chat_id,
+                f"❌ <code>{result.txn_id}</code> not found, "
+                f"or field <code>{result.field}</code> not recognised.\n\n"
+                "Valid fields: amount · in · out · party · notes · description · date")
+        else:
+            await send_text(bot, chat_id,
+                f"✏️ <b>Entry Updated</b>\n\n"
+                f"Txn ID: <code>{result.txn_id}</code>\n"
+                f"Field:  <code>{result.field}</code>\n"
+                f"Value:  <code>{result.value}</code>\n\n"
+                f"✅ Running balances recalculated.")
+        return
+
     # ── Transaction entry ─────────────────────────────────────────────────────
     if isinstance(result, BankEntry):
+        # ── Duplicate check ───────────────────────────────────────────────────
+        amount     = result.amount_in or result.amount_out
+        entry_date = result.date_str or _date.today().strftime("%d-%m-%Y")
+        if result.party and check_duplicate(result.party, amount, entry_date):
+            _pending_bank_entry[chat_id] = result
+            await send_text(bot, chat_id,
+                f"⚠️ <b>Possible duplicate detected</b>\n\n"
+                f"Date:   <code>{entry_date}</code>\n"
+                f"Party:  <b>{result.party.upper()}</b>\n"
+                f"Amount: <b>AED {amount:,.2f}</b>\n\n"
+                "A similar entry already exists.\n"
+                "Reply <b>YES</b> to add anyway, or <b>NO</b> to cancel.")
+            return
+
         new_balance, txn_id = add_bank_entry(
             transaction_type=result.transaction_type,
             mode=result.mode,

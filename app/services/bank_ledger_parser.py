@@ -76,6 +76,18 @@ class BankStatement:
     as_pdf: bool = False
 
 
+@dataclass
+class BankDelete:
+    txn_id: str          # e.g. "TXN-0003"
+
+
+@dataclass
+class BankEdit:
+    txn_id: str          # e.g. "TXN-0003"
+    field:  str          # amount | in | out | party | notes | description | date
+    value:  str          # new value as raw string
+
+
 # ── Low-level helpers ─────────────────────────────────────────────────────────
 
 def _clean(s: str) -> str:
@@ -140,7 +152,7 @@ def _parse_incoming(tail: str, mode: str, description: str) -> BankEntry:
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
-def parse_bank_command(text: str) -> "BankEntry | BankStatement | str | None":
+def parse_bank_command(text: str) -> "BankEntry | BankStatement | BankDelete | BankEdit | str | None":
     """
     Parse a bank ledger command.
 
@@ -233,6 +245,23 @@ def parse_bank_command(text: str) -> "BankEntry | BankStatement | str | None":
             amount_out=amt,
             notes=notes,
             date_str=date_str,
+        )
+
+    # ── Delete txn ────────────────────────────────────────────────────────────
+    m = re.match(r"^delete\s+txn\s+(TXN-\d+)\b", text, re.I)
+    if m:
+        return BankDelete(txn_id=m.group(1).upper())
+
+    # ── Edit txn ──────────────────────────────────────────────────────────────
+    # edit txn TXN-0003 amount 7000
+    # edit txn TXN-0003 party GULF EXTRUSION LLC
+    # edit txn TXN-0003 notes INVOICE 9999
+    m = re.match(r"^edit\s+txn\s+(TXN-\d+)\s+(\w+)\s+(.+)", text, re.I)
+    if m:
+        return BankEdit(
+            txn_id=m.group(1).upper(),
+            field=m.group(2).lower(),
+            value=_clean(m.group(3)),
         )
 
     return None
