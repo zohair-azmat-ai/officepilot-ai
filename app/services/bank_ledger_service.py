@@ -103,7 +103,8 @@ def _open_or_create(year: int):
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Transactions"
-    ws.append(_HEADERS)
+    for col_i, header in enumerate(_HEADERS, 1):
+        ws.cell(1, col_i).value = header
     _style_header_row(ws, 1)
     ws.row_dimensions[1].height = 20
     for i, w in enumerate(_COL_WIDTHS, 1):
@@ -217,6 +218,9 @@ def add_bank_entry(
     ws.cell(row_num, _C_OUT).value   = amount_out if amount_out else None
     ws.cell(row_num, _C_BAL).value   = new_bal
     ws.cell(row_num, _C_NOTES).value = notes.upper() if notes else ""
+    # Safety: clear any stray values beyond the 10-column layout
+    ws.cell(row_num, 11).value = None
+    ws.cell(row_num, 12).value = None
     _style_data_row(ws, row_num, transaction_type == "Incoming")
 
     wb.save(path)
@@ -535,16 +539,19 @@ def generate_bank_statement(
     # ── Rows 9+: Transaction data ──────────────────────────────────────────────
     for i, r in enumerate(period_rows):
         row_n = 9 + i
-        row_data = [
-            r["txn_id"],
-            r["date"], r["type"], r["mode"], r["party"], r["description"],
-            r["in"]  or None,
-            r["out"] or None,
-            r["balance"] if r["balance"] else None,
-            r["notes"],
-        ]
-        for c_idx, val in enumerate(row_data, 1):
-            ws.cell(row_n, c_idx).value = val
+        ws.cell(row_n, _C_TXN).value   = r["txn_id"]
+        ws.cell(row_n, _C_DATE).value  = r["date"]
+        ws.cell(row_n, _C_TYPE).value  = r["type"]
+        ws.cell(row_n, _C_MODE).value  = r["mode"]
+        ws.cell(row_n, _C_PARTY).value = r["party"]
+        ws.cell(row_n, _C_DESC).value  = r["description"]
+        ws.cell(row_n, _C_IN).value    = r["in"]  or None
+        ws.cell(row_n, _C_OUT).value   = r["out"] or None
+        ws.cell(row_n, _C_BAL).value   = r["balance"] if r["balance"] else None
+        ws.cell(row_n, _C_NOTES).value = r["notes"]
+        # Safety: clear any stray values beyond the 10-column layout
+        ws.cell(row_n, 11).value = None
+        ws.cell(row_n, 12).value = None
         _style_data_row(ws, row_n, r["type"] == "Incoming")
         ws.row_dimensions[row_n].height = 18
 

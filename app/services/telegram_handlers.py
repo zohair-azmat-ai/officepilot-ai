@@ -83,11 +83,11 @@ _PAY_RE = _re.compile(
     _re.I,
 )
 
-# add ledger COMPANY invoice NUMBER debit AMOUNT
-_ADD_DEBIT_RE = _re.compile(
+# add ledger COMPANY invoice NUMBER debit|credit AMOUNT [lpo X] [date DD-MM-YYYY]
+_ADD_LEDGER_RE = _re.compile(
     r"add\s+ledger\s+(?P<company>.+?)\s+"
     r"(?:invoice|inv)\s*#?\s*(?P<invoice>\S+)\s+"
-    r"(?:debit|amount|amt)\s+(?P<amount>[\d,]+(?:\.\d{1,2})?)",
+    r"(?P<entry_type>debit|credit|amount|amt)\s+(?P<amount>[\d,]+(?:\.\d{1,2})?)",
     _re.I,
 )
 
@@ -184,6 +184,7 @@ _HELP = (
     "balance quant\n"
     "outstanding islami\n"
     "add ledger gulf invoice 1234 debit 5000\n"
+    "add ledger gulf invoice 1234 credit 5000\n"
     "payment received for gulf invoice 1234 amount 5000</pre>\n\n"
     "<b>── Account Statement ──</b>\n"
     "<pre>statement gulf april 2026\n"
@@ -570,23 +571,26 @@ async def _handle_create_ledger(text: str, chat_id: int, bot) -> None:
         f"✅ Ledger created for <b>{company}</b>")
 
 
-# ── Add debit handler ─────────────────────────────────────────────────────────
+# ── Add ledger entry handler (debit or credit) ────────────────────────────────
 
 async def _handle_add_debit(text: str, chat_id: int, bot) -> None:
-    from app.services.ledger_excel import add_debit_row, ledger_exists
+    from app.services.ledger_excel import add_debit_row, add_credit_row, ledger_exists
 
-    m = _ADD_DEBIT_RE.search(text)
+    m = _ADD_LEDGER_RE.search(text)
     if not m:
         await send_text(bot, chat_id,
             "❌ Format:\n"
-            "<pre>add ledger COMPANY invoice NUMBER debit AMOUNT</pre>")
+            "<pre>add ledger COMPANY invoice NUMBER debit AMOUNT\n"
+            "add ledger COMPANY invoice NUMBER credit AMOUNT</pre>")
         return
 
-    raw     = m.group("company").strip()
-    inv_no  = m.group("invoice").strip()
-    amount  = float(m.group("amount").replace(",", ""))
-    company = resolve_company_name(raw)
-    logger.info("Add debit: %r → %r  inv=%s  amount=%.2f", raw, company, inv_no, amount)
+    raw        = m.group("company").strip()
+    inv_no     = m.group("invoice").strip()
+    amount     = float(m.group("amount").replace(",", ""))
+    entry_type = m.group("entry_type").lower()   # "debit" | "credit" | "amount" | "amt"
+    is_credit  = entry_type == "credit"
+    company    = resolve_company_name(raw)
+    logger.info("Add ledger %s: %r → %r  inv=%s  amount=%.2f", entry_type, raw, company, inv_no, amount)
 
     if not ledger_exists(company):
         await send_text(bot, chat_id,
@@ -595,20 +599,30 @@ async def _handle_add_debit(text: str, chat_id: int, bot) -> None:
         return
 
     entry_date = _extract_date(text)
-    lpo_m = _LPO_RE.search(text)
+    lpo_m  = _LPO_RE.search(text)
     lpo_no = lpo_m.group("lpo").strip() if lpo_m else None
-    description = f"LPO {lpo_no}" if lpo_no else "Entry"
 
-    add_debit_row(company, inv_no, amount, description=description, date_str=entry_date)
-    reply = (
-        f"✅ <b>Debit added</b>\n\n"
-        f"Company: <b>{company}</b>\n"
-        f"Invoice: <code>{inv_no}</code>\n"
-        f"Amount:  <b>AED {amount:,.2f}</b>\n"
-        f"Date:    <code>{entry_date}</code>"
-    )
-    if lpo_no:
-        reply += f"\nLPO:     <code>{lpo_no}</code>"
+    if is_credit:
+        add_credit_row(company, inv_no, amount, date_str=entry_date)
+        reply = (
+            f"✅ <b>Payment added</b>\n\n"
+            f"Company: <b>{company}</b>\n"
+            f"Invoice: <code>{inv_no}</code>\n"
+            f"Amount:  <b>AED {amount:,.2f}</b>\n"
+            f"Date:    <code>{entry_date}</code>"
+        )
+    else:
+        description = f"LPO {lpo_no}" if lpo_no else "Entry"
+        add_debit_row(company, inv_no, amount, description=description, date_str=entry_date)
+        reply = (
+            f"✅ <b>Invoice added</b>\n\n"
+            f"Company: <b>{company}</b>\n"
+            f"Invoice: <code>{inv_no}</code>\n"
+            f"Amount:  <b>AED {amount:,.2f}</b>\n"
+            f"Date:    <code>{entry_date}</code>"
+        )
+        if lpo_no:
+            reply += f"\nLPO:     <code>{lpo_no}</code>"
     await send_text(bot, chat_id, reply)
 
 
